@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Player, PlayMode } from '../types/game';
+import { Player, PlayMode, StoredSession } from '../types/game';
 import { sound } from '../utils/audio';
 import { multiplayer } from '../utils/multiplayer';
-import { Sparkles, Users, Globe, Copy, Check, Share2, ArrowRight, Loader2 } from 'lucide-react';
+import { Sparkles, Users, Globe, Copy, Check, Share2, ArrowRight, Loader2, RotateCcw, Play } from 'lucide-react';
 
 interface LobbyProps {
   onStartLocalGame: (p1: Player, p2: Player) => void;
   onStartOnlineGame: (myPlayer: Player, otherPlayer: Player, isHost: boolean) => void;
+  onResumeSession?: (session: StoredSession) => void;
 }
 
 const AVATAR_OPTIONS = ['🦁', '🐱', '🦦', '🦖', '🦕', '☕', '🧋', '☀️', '🌙', '🌸', '🦊', '🐼'];
@@ -14,8 +15,8 @@ const AVATAR_OPTIONS = ['🦁', '🐱', '🦦', '🦖', '🦕', '☕', '🧋', '
 export const Lobby: React.FC<LobbyProps> = ({
   onStartLocalGame,
   onStartOnlineGame,
+  onResumeSession,
 }) => {
-  // Check URL params for invited room
   const queryParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const invitedRoomCode = queryParams.get('room') || '';
 
@@ -33,12 +34,49 @@ export const Lobby: React.FC<LobbyProps> = ({
     return localStorage.getItem('sq_avatar') || (invitedRoomCode ? '🦊' : '🦁');
   });
 
+  // Check saved session in localStorage
+  const [savedSession, setSavedSession] = useState<StoredSession | null>(() => {
+    try {
+      const raw = localStorage.getItem('sq_active_session');
+      const rawState = localStorage.getItem('sq_active_game_state');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Only valid if within last 24 hours
+        if (Date.now() - (parsed.lastActive || 0) < 24 * 60 * 60 * 1000) {
+          return parsed as StoredSession;
+        }
+      } else if (rawState) {
+        const parsedState = JSON.parse(rawState);
+        if (parsedState.status && parsedState.status !== 'LOBBY') {
+          return {
+            roomCode: parsedState.roomCode || '',
+            myRole: parsedState.roomCode ? 'p1' : 'local',
+            isMultiplayer: Boolean(parsedState.roomCode),
+            myPlayer: parsedState.player1,
+            otherPlayer: parsedState.player2,
+            lastActive: parsedState.lastUpdated || Date.now(),
+          };
+        }
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  // Recent room codes list (so user never forgets their code!)
+  const [recentRooms, setRecentRooms] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('sq_recent_rooms');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return [];
+  });
+
   // Local 1-Device mode extra inputs
   const [p2LocalName, setP2LocalName] = useState('Agata');
   const [p2LocalAvatar, setP2LocalAvatar] = useState('🌸');
 
   // Online Room State
-  const [roomCodeInput, setRoomCodeInput] = useState(invitedRoomCode);
+  const [roomCodeInput, setRoomCodeInput] = useState(invitedRoomCode || (recentRooms[0] || ''));
   const [createdRoomCode, setCreatedRoomCode] = useState('');
   const [waitingForGuest, setWaitingForGuest] = useState(false);
   const [guestConnected, setGuestConnected] = useState<Player | null>(null);
@@ -53,6 +91,21 @@ export const Lobby: React.FC<LobbyProps> = ({
     localStorage.setItem('sq_gender', myGender);
     localStorage.setItem('sq_avatar', myAvatar);
   }, [myName, myGender, myAvatar]);
+
+  // Helper to save recent room
+  const saveRecentRoom = (code: string) => {
+    const updated = [code, ...recentRooms.filter((r) => r !== code)].slice(0, 3);
+    setRecentRooms(updated);
+    localStorage.setItem('sq_recent_rooms', JSON.stringify(updated));
+  };
+
+  // Clear saved session
+  const clearSession = () => {
+    sound.playClick();
+    localStorage.removeItem('sq_active_session');
+    localStorage.removeItem('sq_active_game_state');
+    setSavedSession(null);
+  };
 
   // Handle Host creating a room
   const handleCreateRoom = async () => {
@@ -79,12 +132,26 @@ export const Lobby: React.FC<LobbyProps> = ({
       setWaitingForGuest(true);
       await multiplayer.createRoom(code, hostPlayer);
       setCreatedRoomCode(code);
+      saveRecentRoom(code);
+
+      // Save active session
+      const sessionData: StoredSession = {
+        roomCode: code,
+        myRole: 'p1',
+        isMultiplayer: true,
+        myPlayer: hostPlayer,
+        lastActive: Date.now(),
+      };
+      localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
 
       // Listen for partner connection
       multiplayer.onEvent((event) => {
         if (event.type === 'GUEST_JOINED') {
           sound.playLadderClimb();
           setGuestConnected(event.player);
+          // update session with partner
+          sessionData.otherPlayer = event.player;
+          localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
         }
       });
     } catch (e: any) {
@@ -151,6 +218,18 @@ export const Lobby: React.FC<LobbyProps> = ({
       const host = await multiplayer.joinRoom(roomCodeInput.trim(), guestPlayer);
       setHostPlayerFound(host);
       setJoiningLoading(false);
+      saveRecentRoom(roomCodeInput.trim().toUpperCase());
+
+      // Save active session
+      const sessionData: StoredSession = {
+        roomCode: roomCodeInput.trim().toUpperCase(),
+        myRole: 'p2',
+        isMultiplayer: true,
+        myPlayer: guestPlayer,
+        otherPlayer: host,
+        lastActive: Date.now(),
+      };
+      localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
 
       // Listen for host starting the game
       multiplayer.onEvent((event) => {
@@ -165,6 +244,14 @@ export const Lobby: React.FC<LobbyProps> = ({
         err.message || 'Room tidak ditemukan atau kode salah. Pastikan pasangan sudah membuat room.'
       );
     }
+  };
+
+  // Resume active session
+  const handleResume = () => {
+    if (!savedSession || !onResumeSession) return;
+    sound.playClick();
+    sound.playLadderClimb();
+    onResumeSession(savedSession);
   };
 
   // Share / Copy Link
@@ -243,6 +330,38 @@ export const Lobby: React.FC<LobbyProps> = ({
           Tukar pikiran, saling membuka hati, dan tertawa bersama pasangan lewat HP masing-masing.
         </p>
       </div>
+
+      {/* RESUME ACTIVE SESSION CARD (If player refreshed browser or reopened tab!) */}
+      {savedSession && !waitingForGuest && (
+        <div className="mb-5 p-4 rounded-3xl bg-gradient-to-r from-[#FFD23F] to-[#80DED9] border-3 border-[#1E1B18] shadow-[5px_5px_0px_#1E1B18] animate-in fade-in">
+          <div className="flex items-center justify-between mb-2">
+            <span className="px-2.5 py-0.5 rounded-full bg-white border border-[#1E1B18] text-[10px] font-archivo uppercase shadow-[1px_1px_0px_#1E1B18]">
+              ⚡ Sesi Aktif Ditemukan
+            </span>
+            <button
+              type="button"
+              onClick={clearSession}
+              className="text-[10px] font-bold text-gray-700 hover:text-red-700 underline"
+            >
+              Hapus Sesi
+            </button>
+          </div>
+
+          <p className="text-xs sm:text-sm font-bold text-[#1E1B18] mb-3">
+            Kamu sedang bermain di <span className="underline">Room {savedSession.roomCode}</span>
+            {savedSession.otherPlayer ? ` bersama ${savedSession.otherPlayer.name}` : ''}.
+          </p>
+
+          <button
+            type="button"
+            onClick={handleResume}
+            className="w-full py-3 px-4 rounded-2xl bg-white text-[#1E1B18] font-archivo text-xs sm:text-sm uppercase border-3 border-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-2"
+          >
+            <Play className="w-4 h-4 text-green-600 fill-current" />
+            <span>LANJUTKAN PERMAINAN SEKARANG</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Mode Toggle: Online LDR vs 1 HP */}
       <div className="mb-5 grid grid-cols-2 gap-2 p-1 bg-white rounded-2xl border-3 border-[#1E1B18] shadow-[4px_4px_0px_#1E1B18]">
@@ -509,6 +628,26 @@ export const Lobby: React.FC<LobbyProps> = ({
                     className="w-full text-center tracking-widest font-mono text-xl py-2.5 rounded-xl bg-white border-3 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] focus:outline-none uppercase font-bold"
                   />
 
+                  {/* Recent Rooms Quick Buttons (Never lose a code!) */}
+                  {recentRooms.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap justify-center text-xs">
+                      <span className="text-gray-500 text-[10px]">Kode Tersimpan:</span>
+                      {recentRooms.map((rc) => (
+                        <button
+                          key={rc}
+                          type="button"
+                          onClick={() => {
+                            sound.playClick();
+                            setRoomCodeInput(rc);
+                          }}
+                          className="px-2 py-0.5 rounded-lg bg-white border border-[#1E1B18] font-mono text-[11px] font-bold shadow-[1px_1px_0px_#1E1B18]"
+                        >
+                          {rc}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   <button
                     type="submit"
                     disabled={joiningLoading}
@@ -536,7 +675,6 @@ export const Lobby: React.FC<LobbyProps> = ({
       {/* ================= MODE 1 HP (PASS & PLAY) ================= */}
       {playMode === 'LOCAL_1_DEVICE' && (
         <form onSubmit={handleStartLocal} className="space-y-4">
-          {/* Player 2 Info for Local Mode */}
           <div className="p-4 rounded-3xl bg-[#FFF0F3] border-3 border-[#1E1B18] shadow-[4px_4px_0px_#1E1B18]">
             <span className="font-archivo text-xs uppercase text-[#FF758F] block mb-2">
               Profil Pasangan Kamu (Pemain 2):

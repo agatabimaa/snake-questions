@@ -72,3 +72,26 @@ export interface AnsweredLog {
   turnNumber: number;
   timestamp: string;
 }
+
+export interface SyncedGameState {
+  roomCode: string;
+  status: GameStatus;
+  currentTurn: 'p1' | 'p2';
+  turnCount: number;
+  player1: Player;
+  player2: Player;
+  currentQuestion: Question | null;
+  currentDare: Question | null;
+  logs: AnsweredLog[];
+  winner: Player | null;
+  lastUpdated: number;
+}
+
+export interface StoredSession {
+  roomCode: string;
+  myRole: 'p1' | 'p2' | 'local';
+  isMultiplayer: boolean;
+  myPlayer: Player;
+  otherPlayer?: Player;
+  lastActive: number;
+}

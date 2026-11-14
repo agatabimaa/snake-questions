@@ -1,8 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Player, GameStatus } from '../types/game';
 import { sound } from '../utils/audio';
-import { voiceOver } from '../utils/voiceOver';
-import { Volume2, VolumeX, Music, BookOpen, RotateCcw, Mic, MicOff } from 'lucide-react';
+import { Volume2, VolumeX, Music, BookOpen, RotateCcw, Copy, Check, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   player1: Player;
@@ -11,10 +10,9 @@ interface HeaderProps {
   gameStatus: GameStatus;
   soundEnabled: boolean;
   bgmEnabled: boolean;
-  voiceOverEnabled: boolean;
+  roomCode?: string;
   onToggleSound: () => void;
   onToggleBgm: () => void;
-  onToggleVoiceOver: () => void;
   onOpenHistory: () => void;
   onRestart: () => void;
   historyCount: number;
@@ -27,20 +25,29 @@ export const Header: React.FC<HeaderProps> = ({
   gameStatus,
   soundEnabled,
   bgmEnabled,
-  voiceOverEnabled,
+  roomCode,
   onToggleSound,
   onToggleBgm,
-  onToggleVoiceOver,
   onOpenHistory,
   onRestart,
   historyCount,
 }) => {
   const activePlayer = currentTurn === 'p1' ? player1 : player2;
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  const copyRoomLink = () => {
+    if (!roomCode) return;
+    sound.playClick();
+    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+    navigator.clipboard.writeText(url);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
 
   return (
     <header className="sticky top-0 z-30 w-full bg-[#FAF6EE] border-b-4 border-[#1E1B18] px-3 py-2.5 shadow-sm">
       <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
-        {/* Brand Logo & Title */}
+        {/* Brand Logo & Room Badge */}
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 rounded-xl bg-[#FFD23F] border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] flex items-center justify-center text-xl font-archivo rotate-[-2deg]">
             🐍
@@ -50,9 +57,23 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="font-archivo text-base sm:text-lg leading-none tracking-tight uppercase">
                 Snake Questions
               </h1>
-              <span className="hidden xs:inline-block text-[10px] font-bold bg-[#FF758F] text-white px-1.5 py-0.5 rounded-full border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18]">
-                Deep Talk
-              </span>
+              {roomCode && (
+                <button
+                  type="button"
+                  onClick={copyRoomLink}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FFD23F] text-[#1E1B18] border-2 border-[#1E1B18] text-[11px] sm:text-xs font-archivo uppercase shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 hover:bg-[#FFE066] transition-all"
+                  title="Klik untuk salin link room"
+                >
+                  <span className="font-mono font-black tracking-wide">ROOM: {roomCode}</span>
+                  {copiedCode ? (
+                    <span className="text-[10px] text-green-800 font-bold flex items-center gap-0.5">
+                      <Check className="w-3 h-3" /> Tersalin!
+                    </span>
+                  ) : (
+                    <Copy className="w-3 h-3 text-[#1E1B18]" />
+                  )}
+                </button>
+              )}
             </div>
             <p className="text-[11px] font-medium text-gray-700 leading-tight">
               Ular Tangga Khusus Pasangan
@@ -82,17 +103,6 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Voice-Over (Komentator Suara) Toggle */}
-          <button
-            onClick={onToggleVoiceOver}
-            className={`p-2 rounded-xl border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${
-              voiceOverEnabled ? 'bg-[#FF758F] text-white animate-pulse' : 'bg-gray-200 text-gray-600'
-            }`}
-            title={voiceOverEnabled ? 'Matikan Voice Over Komentator' : 'Nyalakan Voice Over Komentator'}
-          >
-            {voiceOverEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-          </button>
-
           {/* Sound SFX Toggle */}
           <button
             onClick={onToggleSound}
@@ -114,24 +124,24 @@ export const Header: React.FC<HeaderProps> = ({
             className={`p-2 rounded-xl border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${
               bgmEnabled ? 'bg-[#FFD23F] animate-pulse' : 'bg-gray-200'
             }`}
-            title={bgmEnabled ? 'Matikan Musik Lo-Fi' : 'Nyalakan Musik Lo-Fi Pasangan'}
+            title={bgmEnabled ? 'Matikan Musik Santai' : 'Nyalakan Musik Santai Pasangan'}
           >
             <Music className="w-4 h-4 text-[#1E1B18]" />
           </button>
 
-          {/* Restart Button */}
+          {/* Leave / Restart Button */}
           {gameStatus !== 'LOBBY' && (
             <button
               onClick={() => {
                 sound.playClick();
-                if (window.confirm('Mulai ulang permainan dari awal?')) {
+                if (window.confirm('Keluar dari room dan kembali ke menu utama?')) {
                   onRestart();
                 }
               }}
               className="p-2 rounded-xl bg-[#FF5964] text-white border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
-              title="Reset Permainan"
+              title="Keluar Room & Menu Utama"
             >
-              <RotateCcw className="w-4 h-4" />
+              <LogOut className="w-4 h-4" />
             </button>
           )}
         </div>

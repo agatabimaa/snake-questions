@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Player, GameStatus, TileData, Question, AnsweredLog } from './types/game';
+import { Player, GameStatus, TileData, Question, AnsweredLog, SyncedGameState, StoredSession } from './types/game';
 import { generate49Tiles, getTileCoordinates, TOTAL_TILES } from './utils/board';
 import { QuestionManager } from './utils/questionManager';
 import { sound } from './utils/audio';
-import { voiceOver } from './utils/voiceOver';
 import { multiplayer } from './utils/multiplayer';
 
 import { Header } from './components/Header';
@@ -19,6 +18,7 @@ export const App: React.FC = () => {
   const [gameStatus, setGameStatus] = useState<GameStatus>('LOBBY');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [myRole, setMyRole] = useState<'p1' | 'p2' | 'local'>('local');
+  const [activeRoomCode, setActiveRoomCode] = useState<string>('');
 
   // Players
   const [player1, setPlayer1] = useState<Player>({
@@ -69,16 +69,140 @@ export const App: React.FC = () => {
   const [logs, setLogs] = useState<AnsweredLog[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
-  // Audio & Voice toggles
+  // Audio toggles
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [bgmEnabled, setBgmEnabled] = useState(false);
-  const [voiceOverEnabled, setVoiceOverEnabled] = useState(true);
 
   const qManagerRef = useRef<QuestionManager>(new QuestionManager('LDR'));
 
   const activePlayer = currentTurn === 'p1' ? player1 : player2;
   const otherPlayer = currentTurn === 'p1' ? player2 : player1;
   const isMyTurn = !isMultiplayer || myRole === currentTurn;
+
+  // Persist game state to localStorage and retained MQTT topic
+  const persistState = (
+    updatedStatus?: GameStatus,
+    updatedP1?: Player,
+    updatedP2?: Player,
+    updatedTurn?: 'p1' | 'p2',
+    updatedLogs?: AnsweredLog[],
+    updatedQ?: Question | null,
+    updatedDare?: Question | null
+  ) => {
+    const p1 = updatedP1 || player1;
+    const p2 = updatedP2 || player2;
+    const status = updatedStatus || gameStatus;
+    const turn = updatedTurn || currentTurn;
+    const logList = updatedLogs || logs;
+    const q = updatedQ !== undefined ? updatedQ : currentQuestion;
+    const d = updatedDare !== undefined ? updatedDare : currentDare;
+
+    const syncedState: SyncedGameState = {
+      roomCode: activeRoomCode,
+      status,
+      currentTurn: turn,
+      turnCount,
+      player1: p1,
+      player2: p2,
+      currentQuestion: q,
+      currentDare: d,
+      logs: logList,
+      winner,
+      lastUpdated: Date.now(),
+    };
+
+    localStorage.setItem('sq_active_game_state', JSON.stringify(syncedState));
+
+    // Also keep active session updated
+    const sessionData: StoredSession = {
+      roomCode: activeRoomCode,
+      myRole,
+      isMultiplayer,
+      myPlayer: myRole === 'p2' ? p2 : p1,
+      otherPlayer: myRole === 'p2' ? p1 : p2,
+      lastActive: Date.now(),
+    };
+    localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
+
+    // Save to recent rooms list
+    if (activeRoomCode) {
+      try {
+        const rawRecent = localStorage.getItem('sq_recent_rooms');
+        const recent: string[] = rawRecent ? JSON.parse(rawRecent) : [];
+        const updated = [activeRoomCode, ...recent.filter((r) => r !== activeRoomCode)].slice(0, 5);
+        localStorage.setItem('sq_recent_rooms', JSON.stringify(updated));
+      } catch (e) {}
+    }
+
+    if (isMultiplayer && activeRoomCode) {
+      multiplayer.publishGameState(syncedState);
+    }
+  };
+
+  // Bulletproof Auto-restore session on page load / refresh
+  useEffect(() => {
+    try {
+      const rawState = localStorage.getItem('sq_active_game_state');
+      const rawSession = localStorage.getItem('sq_active_session');
+
+      if (rawState) {
+        const state = JSON.parse(rawState) as SyncedGameState;
+        const session = rawSession ? (JSON.parse(rawSession) as StoredSession) : null;
+
+        // Valid if game was already started (not in LOBBY)
+        if (state && state.status && state.status !== 'LOBBY') {
+          // If was refreshed during pawn moving animation, reset to PLAYING so game is never locked
+          const safeStatus: GameStatus = state.status === 'MOVING' ? 'PLAYING' : state.status;
+          
+          setGameStatus(safeStatus);
+          setPlayer1(state.player1);
+          setPlayer2(state.player2);
+          setCurrentTurn(state.currentTurn);
+          setTurnCount(state.turnCount || 1);
+          setLogs(state.logs || []);
+          setCurrentQuestion(state.currentQuestion);
+          setCurrentDare(state.currentDare);
+          setWinner(state.winner);
+
+          const isOnline = Boolean(state.roomCode);
+          setIsMultiplayer(isOnline);
+          setActiveRoomCode(state.roomCode || '');
+
+          const role = session?.myRole || (isOnline ? 'p1' : 'local');
+          setMyRole(role);
+
+          qManagerRef.current.setMode(isOnline ? 'LDR' : 'OFFLINE');
+
+          // Sync room code to browser URL without reloading
+          if (isOnline && state.roomCode && typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get('room') !== state.roomCode) {
+              url.searchParams.set('room', state.roomCode);
+              window.history.replaceState({}, '', url.toString());
+            }
+
+            // Resume MQTT WebSocket connection
+            multiplayer.resumeRoomSession(state.roomCode, role === 'p1').then((retained) => {
+              if (retained) {
+                setPlayer1(retained.player1);
+                setPlayer2(retained.player2);
+                setCurrentTurn(retained.currentTurn);
+                setTurnCount(retained.turnCount);
+                setLogs(retained.logs || []);
+                setCurrentQuestion(retained.currentQuestion);
+                setCurrentDare(retained.currentDare);
+                if (retained.status && retained.status !== 'MOVING') {
+                  setGameStatus(retained.status);
+                }
+              }
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error restoring session:', e);
+    }
+  }, []);
 
   const handleToggleSound = () => {
     sound.enabled = !sound.enabled;
@@ -90,73 +214,127 @@ export const App: React.FC = () => {
     setBgmEnabled(active);
   };
 
-  const handleToggleVoiceOver = () => {
-    voiceOver.enabled = !voiceOver.enabled;
-    setVoiceOverEnabled(voiceOver.enabled);
-    if (!voiceOver.enabled) {
-      voiceOver.stop();
-    }
-  };
-
   // Start Local 1-Device Game
   const handleStartLocalGame = (p1: Player, p2: Player) => {
     setPlayer1(p1);
     setPlayer2(p2);
     setIsMultiplayer(false);
     setMyRole('local');
+    setActiveRoomCode('');
     setCurrentTurn('p1');
     setTurnCount(1);
     setLogs([]);
     setWinner(null);
     setAnimatingPawn(null);
 
+    const sessionData: StoredSession = {
+      roomCode: '',
+      myRole: 'local',
+      isMultiplayer: false,
+      myPlayer: p1,
+      otherPlayer: p2,
+      lastActive: Date.now(),
+    };
+    localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
+
     qManagerRef.current.setMode('OFFLINE');
     setGameStatus('PLAYING');
-    voiceOver.speak('Permainan dimulai! Selamat bersenang-senang dan saling membuka hati.');
+    persistState('PLAYING', p1, p2, 'p1', []);
   };
 
   // Start Online Multiplayer Game
   const handleStartOnlineGame = (me: Player, partner: Player, isHost: boolean) => {
     setIsMultiplayer(true);
     setMyRole(isHost ? 'p1' : 'p2');
+    const room = multiplayer.roomCode;
+    setActiveRoomCode(room);
+
     setCurrentTurn('p1');
     setTurnCount(1);
     setLogs([]);
     setWinner(null);
     setAnimatingPawn(null);
 
-    if (isHost) {
-      setPlayer1(me);
-      setPlayer2(partner);
-    } else {
-      setPlayer1(partner);
-      setPlayer2(me);
+    const p1 = isHost ? me : partner;
+    const p2 = isHost ? partner : me;
+
+    setPlayer1(p1);
+    setPlayer2(p2);
+
+    const sessionData: StoredSession = {
+      roomCode: room,
+      myRole: isHost ? 'p1' : 'p2',
+      isMultiplayer: true,
+      myPlayer: me,
+      otherPlayer: partner,
+      lastActive: Date.now(),
+    };
+    localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
+
+    // Update URL query parameter without page reload
+    if (typeof window !== 'undefined' && room) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('room', room);
+      window.history.replaceState({}, '', url.toString());
     }
 
     qManagerRef.current.setMode('LDR');
     setGameStatus('PLAYING');
-    voiceOver.speak('Pasangan berhasil terhubung! Permainan online dimulai.');
+
+    persistState('PLAYING', p1, p2, 'p1', []);
   };
 
-  // Switch turn
+  // Resume session from Lobby card
+  const handleResumeSession = (session: StoredSession) => {
+    try {
+      const rawState = localStorage.getItem('sq_active_game_state');
+      if (rawState) {
+        const state = JSON.parse(rawState) as SyncedGameState;
+        setActiveRoomCode(session.roomCode);
+        setIsMultiplayer(session.isMultiplayer);
+        setMyRole(session.myRole);
+        setGameStatus(state.status === 'MOVING' ? 'PLAYING' : state.status);
+        setPlayer1(state.player1);
+        setPlayer2(state.player2);
+        setCurrentTurn(state.currentTurn);
+        setTurnCount(state.turnCount || 1);
+        setLogs(state.logs || []);
+        setCurrentQuestion(state.currentQuestion);
+        setCurrentDare(state.currentDare);
+
+        if (session.isMultiplayer && session.roomCode) {
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.set('room', session.roomCode);
+            window.history.replaceState({}, '', url.toString());
+          }
+          multiplayer.resumeRoomSession(session.roomCode, session.myRole === 'p1');
+        }
+      }
+    } catch (e) {}
+  };
+
   const switchTurn = () => {
-    setCurrentTurn((prev) => (prev === 'p1' ? 'p2' : 'p1'));
+    const nextTurn = currentTurn === 'p1' ? 'p2' : 'p1';
+    setCurrentTurn(nextTurn);
     setTurnCount((prev) => prev + 1);
     setGameStatus('PLAYING');
+    persistState('PLAYING', undefined, undefined, nextTurn);
   };
 
   // Listen to multiplayer network events
   useEffect(() => {
-    const unsubscribe = multiplayer.onEvent((event) => {
+    const unsubscribeEvents = multiplayer.onEvent((event) => {
       if (event.type === 'DICE_ROLL') {
-        voiceOver.speakDiceRoll(event.value, event.power);
         executeMovement(event.value);
       } else if (event.type === 'QUESTION_OPENED') {
         setCurrentQuestion(event.question);
         setGameStatus('QUESTION');
+        persistState('QUESTION', undefined, undefined, undefined, undefined, event.question);
       } else if (event.type === 'DARE_OPENED') {
         setCurrentDare(event.dare);
         setGameStatus('ACTION_DARE');
+        persistState('ACTION_DARE', undefined, undefined, undefined, undefined, null, event.dare);
       } else if (event.type === 'QUESTION_REROLLED') {
         setCurrentQuestion(event.question);
       } else if (event.type === 'DARE_REROLLED') {
@@ -171,19 +349,32 @@ export const App: React.FC = () => {
         setTurnCount((prev) => prev + 1);
         setGameStatus('PLAYING');
       } else if (event.type === 'RESTART_GAME') {
+        clearAllSessionData();
         setGameStatus('LOBBY');
       }
     });
 
+    const unsubscribeState = multiplayer.onGameState((state) => {
+      if (state && state.roomCode) {
+        setPlayer1(state.player1);
+        setPlayer2(state.player2);
+        setCurrentTurn(state.currentTurn);
+        setTurnCount(state.turnCount);
+        setLogs(state.logs || []);
+        setCurrentQuestion(state.currentQuestion);
+        setCurrentDare(state.currentDare);
+        setGameStatus(state.status);
+      }
+    });
+
     return () => {
-      unsubscribe();
+      unsubscribeEvents();
+      unsubscribeState();
     };
-  }, [currentTurn]);
+  }, [currentTurn, player1, player2]);
 
-  // Local player rolls dice
+  // Roll completed
   const handleLocalRollComplete = (diceValue: number) => {
-    voiceOver.speakDiceRoll(diceValue, 60);
-
     if (isMultiplayer) {
       multiplayer.send({
         type: 'DICE_ROLL',
@@ -194,7 +385,7 @@ export const App: React.FC = () => {
     executeMovement(diceValue);
   };
 
-  // Execute step-by-step pawn movement (runs on both devices identically)
+  // Step-by-step movement (260ms per step for clear action)
   const executeMovement = (diceValue: number) => {
     setGameStatus('MOVING');
 
@@ -214,9 +405,10 @@ export const App: React.FC = () => {
 
       if (currentStep >= targetPos) {
         clearInterval(stepInterval);
-        setTimeout(() => handleTileLanded(targetPos), 300);
+        // Suspense pause (650ms) so players clearly see where the pawn landed before card triggers!
+        setTimeout(() => handleTileLanded(targetPos), 650);
       }
-    }, 180);
+    }, 260);
   };
 
   // Smooth animation along ladder or snake
@@ -270,7 +462,7 @@ export const App: React.FC = () => {
     if (tile.type === 'FINISH' || tileId >= TOTAL_TILES) {
       setWinner(activePlayer);
       setGameStatus('VICTORY');
-      voiceOver.speakTileEvent('FINISH');
+      persistState('VICTORY');
       return;
     }
 
@@ -278,9 +470,8 @@ export const App: React.FC = () => {
     if (tile.type === 'LADDER' && tile.targetTile) {
       sound.playLadderClimb();
       const target = tile.targetTile;
-      voiceOver.speakTileEvent('LADDER', target);
 
-      animatePawnMovement(tileId, target, 850, () => {
+      animatePawnMovement(tileId, target, 1100, () => {
         if (currentTurn === 'p1') {
           setPlayer1((prev) => ({ ...prev, position: target, laddersClimbed: prev.laddersClimbed + 1 }));
         } else {
@@ -288,7 +479,10 @@ export const App: React.FC = () => {
         }
 
         const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
-        openQuestionModal(q);
+        setTimeout(() => {
+          sound.playModalPop();
+          openQuestionModal(q);
+        }, 400);
       });
       return;
     }
@@ -297,9 +491,8 @@ export const App: React.FC = () => {
     if (tile.type === 'SNAKE' && tile.targetTile) {
       sound.playSnakeSlide();
       const target = tile.targetTile;
-      voiceOver.speakTileEvent('SNAKE', target);
 
-      animatePawnMovement(tileId, target, 950, () => {
+      animatePawnMovement(tileId, target, 1200, () => {
         if (currentTurn === 'p1') {
           setPlayer1((prev) => ({ ...prev, position: target, snakesSlid: prev.snakesSlid + 1 }));
         } else {
@@ -307,51 +500,61 @@ export const App: React.FC = () => {
         }
 
         const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
-        openQuestionModal(q);
+        setTimeout(() => {
+          sound.playModalPop();
+          openQuestionModal(q);
+        }, 400);
       });
       return;
     }
 
-    // Question tiles
+    // Question tiles with dramatic pop-up
     if (tile.type === 'BOY') {
-      sound.playModalPop();
-      voiceOver.speakTileEvent('BOY');
-      const q = qManagerRef.current.drawQuestion('BOY');
-      openQuestionModal(q);
+      setTimeout(() => {
+        sound.playModalPop();
+        const q = qManagerRef.current.drawQuestion('BOY');
+        openQuestionModal(q);
+      }, 350);
       return;
     }
 
     if (tile.type === 'GIRL') {
-      sound.playModalPop();
-      voiceOver.speakTileEvent('GIRL');
-      const q = qManagerRef.current.drawQuestion('GIRL');
-      openQuestionModal(q);
+      setTimeout(() => {
+        sound.playModalPop();
+        const q = qManagerRef.current.drawQuestion('GIRL');
+        openQuestionModal(q);
+      }, 350);
       return;
     }
 
     if (tile.type === 'DEEPTALK') {
-      sound.playModalPop();
-      voiceOver.speakTileEvent('DEEPTALK');
-      const q = qManagerRef.current.drawQuestion('DEEPTALK');
-      openQuestionModal(q);
+      setTimeout(() => {
+        sound.playModalPop();
+        const q = qManagerRef.current.drawQuestion('DEEPTALK');
+        openQuestionModal(q);
+      }, 350);
       return;
     }
 
     if (tile.type === 'ACTION') {
-      sound.playModalPop();
-      voiceOver.speakTileEvent('ACTION');
-      const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
-      openDareModal(dare);
+      setTimeout(() => {
+        sound.playModalPop();
+        const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
+        openDareModal(dare);
+      }, 350);
       return;
     }
 
-    // Chill tile
-    advanceTurn();
+    // Chill tile: brief pause then next turn
+    setTimeout(() => {
+      advanceTurn();
+    }, 500);
   };
 
   const openQuestionModal = (q: Question) => {
     setCurrentQuestion(q);
     setGameStatus('QUESTION');
+    persistState('QUESTION', undefined, undefined, undefined, undefined, q);
     if (isMultiplayer) {
       multiplayer.send({
         type: 'QUESTION_OPENED',
@@ -363,6 +566,7 @@ export const App: React.FC = () => {
   const openDareModal = (dare: Question) => {
     setCurrentDare(dare);
     setGameStatus('ACTION_DARE');
+    persistState('ACTION_DARE', undefined, undefined, undefined, undefined, null, dare);
     if (isMultiplayer) {
       multiplayer.send({
         type: 'DARE_OPENED',
@@ -374,6 +578,8 @@ export const App: React.FC = () => {
   // Complete question answer
   const handleAnswerComplete = () => {
     let newLog: AnsweredLog | undefined = undefined;
+    let nextLogs = logs;
+
     if (currentQuestion) {
       newLog = {
         id: `log-${Date.now()}`,
@@ -384,7 +590,8 @@ export const App: React.FC = () => {
         turnNumber: turnCount,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setLogs((prev) => [newLog!, ...prev]);
+      nextLogs = [newLog, ...logs];
+      setLogs(nextLogs);
 
       if (currentTurn === 'p1') {
         setPlayer1((prev) => ({ ...prev, questionsAnswered: prev.questionsAnswered + 1 }));
@@ -394,13 +601,14 @@ export const App: React.FC = () => {
     }
 
     setCurrentQuestion(null);
-    advanceTurn(newLog);
+    advanceTurn(newLog, nextLogs);
   };
 
   const handleRerollQuestion = () => {
     if (!currentQuestion) return;
     const newQ = qManagerRef.current.reroll(currentQuestion.category, currentQuestion.id);
     setCurrentQuestion(newQ);
+    persistState('QUESTION', undefined, undefined, undefined, undefined, newQ);
     if (isMultiplayer) {
       multiplayer.send({
         type: 'QUESTION_REROLLED',
@@ -411,6 +619,8 @@ export const App: React.FC = () => {
 
   const handleDareComplete = () => {
     let newLog: AnsweredLog | undefined = undefined;
+    let nextLogs = logs;
+
     if (currentDare) {
       newLog = {
         id: `log-${Date.now()}`,
@@ -421,16 +631,18 @@ export const App: React.FC = () => {
         turnNumber: turnCount,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setLogs((prev) => [newLog!, ...prev]);
+      nextLogs = [newLog, ...logs];
+      setLogs(nextLogs);
     }
     setCurrentDare(null);
-    advanceTurn(newLog);
+    advanceTurn(newLog, nextLogs);
   };
 
   const handleRerollDare = () => {
     if (!currentDare) return;
     const newDare = qManagerRef.current.reroll('VIRTUAL_DARE', currentDare.id);
     setCurrentDare(newDare);
+    persistState('ACTION_DARE', undefined, undefined, undefined, undefined, null, newDare);
     if (isMultiplayer) {
       multiplayer.send({
         type: 'DARE_REROLLED',
@@ -439,7 +651,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const advanceTurn = (log?: AnsweredLog) => {
+  const advanceTurn = (log?: AnsweredLog, updatedLogs?: AnsweredLog[]) => {
     const nextTurn = currentTurn === 'p1' ? 'p2' : 'p1';
     if (isMultiplayer) {
       multiplayer.send({
@@ -448,13 +660,23 @@ export const App: React.FC = () => {
         log,
       });
     }
-    switchTurn();
+    setCurrentTurn(nextTurn);
+    setTurnCount((prev) => prev + 1);
+    setGameStatus('PLAYING');
+    persistState('PLAYING', undefined, undefined, nextTurn, updatedLogs, null, null);
+  };
+
+  const clearAllSessionData = () => {
+    localStorage.removeItem('sq_active_session');
+    localStorage.removeItem('sq_active_game_state');
+    multiplayer.cleanup();
   };
 
   const handleRestart = () => {
     if (isMultiplayer) {
       multiplayer.send({ type: 'RESTART_GAME' });
     }
+    clearAllSessionData();
     setGameStatus('LOBBY');
   };
 
@@ -468,10 +690,9 @@ export const App: React.FC = () => {
         gameStatus={gameStatus}
         soundEnabled={soundEnabled}
         bgmEnabled={bgmEnabled}
-        voiceOverEnabled={voiceOverEnabled}
+        roomCode={activeRoomCode}
         onToggleSound={handleToggleSound}
         onToggleBgm={handleToggleBgm}
-        onToggleVoiceOver={handleToggleVoiceOver}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onRestart={handleRestart}
         historyCount={logs.length}
@@ -483,12 +704,13 @@ export const App: React.FC = () => {
           <Lobby
             onStartLocalGame={handleStartLocalGame}
             onStartOnlineGame={handleStartOnlineGame}
+            onResumeSession={handleResumeSession}
           />
         )}
 
         {gameStatus !== 'LOBBY' && (
           <div className="w-full max-w-xl flex flex-col items-center">
-            {/* 1. Pusat Dadu di Tengah Permainan */}
+            {/* 1. Real 3D Dice Roller di Tengah Permainan */}
             <DiceRoller
               activePlayer={activePlayer}
               onRollComplete={handleLocalRollComplete}
@@ -500,9 +722,10 @@ export const App: React.FC = () => {
               }
               isMyTurn={isMyTurn}
               isMultiplayer={isMultiplayer}
+              roomCode={activeRoomCode}
             />
 
-            {/* 2. Visual 49-Tile (7x7) Board with SVG Snakes & Ladders */}
+            {/* 2. Visual 49-Tile (7x7) Board with 3D Depth Toggle */}
             <Board
               tiles={tiles}
               player1={player1}

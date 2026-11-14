@@ -1,5 +1,5 @@
 import mqtt, { MqttClient } from 'mqtt';
-import { Player, Question, AnsweredLog } from '../types/game';
+import { Player, Question, AnsweredLog, SyncedGameState } from '../types/game';
 
 export type NetworkEvent =
   | { type: 'GUEST_JOINED'; player: Player }
@@ -10,6 +10,7 @@ export type NetworkEvent =
   | { type: 'QUESTION_REROLLED'; question: Question }
   | { type: 'DARE_REROLLED'; dare: Question }
   | { type: 'TURN_COMPLETED'; nextTurn: 'p1' | 'p2'; log?: AnsweredLog }
+  | { type: 'GAME_STATE_SYNC'; state: SyncedGameState }
   | { type: 'RESTART_GAME' };
 
 class MultiplayerService {
@@ -17,6 +18,7 @@ class MultiplayerService {
   public isHost: boolean = false;
   public roomCode: string = '';
   private eventHandlers: ((event: NetworkEvent) => void)[] = [];
+  private gameStateHandlers: ((state: SyncedGameState) => void)[] = [];
   private onConnectedHandlers: (() => void)[] = [];
   private onDisconnectedHandlers: (() => void)[] = [];
 
@@ -43,7 +45,7 @@ class MultiplayerService {
       const clientId = `sq-${Math.random().toString(36).substring(2, 9)}`;
       const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
         clientId,
-        clean: true,
+        clean: false, // keep session
         connectTimeout: 8000,
         reconnectPeriod: 2000,
       });
@@ -81,16 +83,16 @@ class MultiplayerService {
     const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
     const topicGuest = `snake-questions/v2/${this.roomCode}/guest`;
     const topicInfo = `snake-questions/v2/${this.roomCode}/info`;
+    const topicState = `snake-questions/v2/${this.roomCode}/state`;
 
     return new Promise((resolve, reject) => {
-      // Subscribe to events and guest notifications
-      client.subscribe([topicEvents, topicGuest], (err) => {
+      client.subscribe([topicEvents, topicGuest, topicState], (err) => {
         if (err) {
           reject(err);
           return;
         }
 
-        // Publish retained room info so guest can join anytime
+        // Publish retained room info
         client.publish(
           topicInfo,
           JSON.stringify({
@@ -116,18 +118,17 @@ class MultiplayerService {
     const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
     const topicGuest = `snake-questions/v2/${this.roomCode}/guest`;
     const topicInfo = `snake-questions/v2/${this.roomCode}/info`;
+    const topicState = `snake-questions/v2/${this.roomCode}/state`;
 
     return new Promise((resolve, reject) => {
       let resolved = false;
 
-      // Timeout if room doesn't exist after 6 seconds
       const timeout = setTimeout(() => {
         if (!resolved) {
           reject(new Error('Room tidak ditemukan atau kode salah. Pastikan pasangan sudah membuat room.'));
         }
       }, 6500);
 
-      // Listen specifically for the retained info topic
       const checkHandler = (topic: string, payload: Buffer) => {
         if (topic === topicInfo) {
           try {
@@ -150,15 +151,14 @@ class MultiplayerService {
               resolve(data.host as Player);
             }
           } catch (e) {
-            // ignore parse error
+            // ignore
           }
         }
       };
 
       client.on('message', checkHandler);
 
-      // Subscribe to all room channels
-      client.subscribe([topicInfo, topicEvents, topicGuest], (err) => {
+      client.subscribe([topicInfo, topicEvents, topicGuest, topicState], (err) => {
         if (err) {
           clearTimeout(timeout);
           reject(err);
@@ -167,14 +167,64 @@ class MultiplayerService {
     });
   }
 
+  // Reconnect directly to an ongoing session room
+  public async resumeRoomSession(code: string, isHostRole: boolean): Promise<SyncedGameState | null> {
+    this.isHost = isHostRole;
+    this.roomCode = code.toUpperCase();
+    const client = await this.connectBroker();
+
+    const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
+    const topicGuest = `snake-questions/v2/${this.roomCode}/guest`;
+    const topicInfo = `snake-questions/v2/${this.roomCode}/info`;
+    const topicState = `snake-questions/v2/${this.roomCode}/state`;
+
+    return new Promise((resolve) => {
+      let fetchedState: SyncedGameState | null = null;
+      const stateTimer = setTimeout(() => {
+        resolve(fetchedState);
+      }, 2500);
+
+      const stateHandler = (topic: string, payload: Buffer) => {
+        if (topic === topicState) {
+          try {
+            const data = JSON.parse(payload.toString());
+            if (data && data.roomCode) {
+              fetchedState = data as SyncedGameState;
+              clearTimeout(stateTimer);
+              client.removeListener('message', stateHandler);
+              resolve(fetchedState);
+            }
+          } catch (e) {}
+        }
+      };
+
+      client.on('message', stateHandler);
+      client.subscribe([topicInfo, topicEvents, topicGuest, topicState], () => {});
+    });
+  }
+
+  // Publish persistent retained game state
+  public publishGameState(state: SyncedGameState) {
+    if (this.client && this.client.connected && this.roomCode) {
+      const topicState = `snake-questions/v2/${this.roomCode}/state`;
+      this.client.publish(topicState, JSON.stringify(state), { retain: true, qos: 1 });
+    }
+  }
+
   // Setup message router
   private setupMessageHandler() {
     if (!this.client) return;
 
     this.client.on('message', (topic: string, payload: Buffer) => {
       try {
-        const msg = JSON.parse(payload.toString());
-        if (msg && msg.type) {
+        const text = payload.toString();
+        const msg = JSON.parse(text);
+
+        if (topic.endsWith('/state')) {
+          if (msg && msg.roomCode) {
+            this.gameStateHandlers.forEach((handler) => handler(msg as SyncedGameState));
+          }
+        } else if (msg && msg.type) {
           this.eventHandlers.forEach((handler) => handler(msg as NetworkEvent));
         }
       } catch (e) {
@@ -195,6 +245,13 @@ class MultiplayerService {
     this.eventHandlers.push(handler);
     return () => {
       this.eventHandlers = this.eventHandlers.filter((h) => h !== handler);
+    };
+  }
+
+  public onGameState(handler: (state: SyncedGameState) => void) {
+    this.gameStateHandlers.push(handler);
+    return () => {
+      this.gameStateHandlers = this.gameStateHandlers.filter((h) => h !== handler);
     };
   }
 

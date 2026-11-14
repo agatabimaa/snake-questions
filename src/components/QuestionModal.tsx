@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Player, Question } from '../types/game';
 import { sound } from '../utils/audio';
-import { voiceOver } from '../utils/voiceOver';
-import { Volume2, RefreshCw, CheckCircle2, Sparkles } from 'lucide-react';
+import { RefreshCw, CheckCircle2, Sparkles, Heart } from 'lucide-react';
 
 interface QuestionModalProps {
   question: Question;
@@ -19,8 +18,6 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({
   onAnswerComplete,
   onReroll,
 }) => {
-  const [isSpeaking, setIsSpeaking] = useState(false);
-
   const getCategoryTheme = () => {
     switch (question.category) {
       case 'BOY':
@@ -71,19 +68,11 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({
 
   const theme = getCategoryTheme();
 
-  const handleReadAloud = () => {
-    sound.playClick();
-    setIsSpeaking(true);
-    voiceOver.speak(question.question, {
-      onEnd: () => setIsSpeaking(false),
-    });
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Polaroid Card Container */}
       <div className="relative w-full max-w-lg bg-[#FAF6EE] rounded-3xl border-4 border-[#1E1B18] shadow-[8px_8px_0px_#1E1B18] p-5 sm:p-7 flex flex-col justify-between max-h-[90vh] overflow-y-auto">
-        {/* Top Floating Badge & Speak Button */}
+        {/* Top Floating Badge */}
         <div className="flex items-center justify-between gap-2 mb-4">
           <div
             className={`px-3 py-1 rounded-full border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] font-archivo text-xs uppercase tracking-wider rotate-[-1deg] ${theme.banner}`}
@@ -92,18 +81,6 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={handleReadAloud}
-              className={`p-1.5 rounded-xl border-2 border-[#1E1B18] shadow-[1.5px_1.5px_0px_#1E1B18] text-xs font-bold flex items-center gap-1 active:translate-x-0.5 active:translate-y-0.5 ${
-                isSpeaking ? 'bg-[#FFD23F] animate-pulse' : 'bg-white'
-              }`}
-              title="Dengarkan Soal (Voice Over)"
-            >
-              <Volume2 className="w-3.5 h-3.5 text-[#1E1B18]" />
-              <span className="text-[10px] hidden xs:inline">Bacakan</span>
-            </button>
-
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
               {question.tag}
             </span>
@@ -142,7 +119,6 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({
             type="button"
             onClick={() => {
               sound.playClick();
-              voiceOver.stop();
               onReroll();
             }}
             className="w-full sm:w-auto px-4 py-3 rounded-xl bg-white text-[#1E1B18] border-3 border-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] font-archivo text-xs sm:text-sm uppercase tracking-wider active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all flex items-center justify-center gap-2 hover:bg-gray-50"
@@ -155,7 +131,6 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({
             type="button"
             onClick={() => {
               sound.playClick();
-              voiceOver.stop();
               onAnswerComplete();
             }}
             className="w-full flex-1 py-3 px-5 rounded-xl bg-[#06D6A0] text-[#1E1B18] border-3 border-[#1E1B18] shadow-[4px_4px_0px_#1E1B18] font-archivo text-sm sm:text-base uppercase tracking-wider active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"

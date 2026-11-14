@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { Player, GameMode, GameStatus, TileData, Question, AnsweredLog } from './types/game';
-import { generate100Tiles, getTileCoordinates } from './utils/board';
+import { generate49Tiles, getTileCoordinates, TOTAL_TILES } from './utils/board';
 import { QuestionManager } from './utils/questionManager';
 import { sound } from './utils/audio';
 
@@ -50,7 +50,7 @@ export const App: React.FC = () => {
 
   const [currentTurn, setCurrentTurn] = useState<'p1' | 'p2'>('p1');
   const [turnCount, setTurnCount] = useState<number>(1);
-  const [tiles] = useState<TileData[]>(generate100Tiles());
+  const [tiles] = useState<TileData[]>(generate49Tiles());
 
   // Visual pawn animation during ladder/snake slide
   const [animatingPawn, setAnimatingPawn] = useState<{
@@ -110,7 +110,7 @@ export const App: React.FC = () => {
     setGameStatus('MOVING');
 
     const startPos = activePlayer.position;
-    const targetPos = Math.min(100, startPos + diceValue);
+    const targetPos = Math.min(TOTAL_TILES, startPos + diceValue);
 
     let currentStep = startPos;
     const stepInterval = setInterval(() => {
@@ -127,7 +127,7 @@ export const App: React.FC = () => {
         clearInterval(stepInterval);
         setTimeout(() => handleTileLanded(targetPos), 300);
       }
-    }, 160);
+    }, 180);
   };
 
   // Smooth animation along ladder or snake
@@ -179,7 +179,7 @@ export const App: React.FC = () => {
     }
 
     // Finish
-    if (tile.type === 'FINISH' || tileId >= 100) {
+    if (tile.type === 'FINISH' || tileId >= TOTAL_TILES) {
       setWinner(activePlayer);
       setGameStatus('VICTORY');
       return;
@@ -341,7 +341,7 @@ export const App: React.FC = () => {
         )}
 
         {gameStatus !== 'LOBBY' && (
-          <div className="w-full max-w-2xl flex flex-col items-center">
+          <div className="w-full max-w-xl flex flex-col items-center">
             {/* 1. Pusat Dadu di Tengah Permainan (Center Game Hub) */}
             <DiceRoller
               activePlayer={activePlayer}
@@ -354,7 +354,7 @@ export const App: React.FC = () => {
               }
             />
 
-            {/* 2. Visual 100-Tile Board with SVG Snakes & Ladders */}
+            {/* 2. Visual 49-Tile (7x7) Board with SVG Snakes & Ladders */}
             <Board
               tiles={tiles}
               player1={player1}

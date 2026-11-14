@@ -1,18 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Player } from '../types/game';
 import { sound } from '../utils/audio';
-import { Dices, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { Dices, Eye, Sparkles, Hourglass } from 'lucide-react';
 
 interface DiceRollerProps {
   activePlayer: Player;
   onRollComplete: (diceValue: number) => void;
   disabled?: boolean;
+  isMyTurn?: boolean;
+  isMultiplayer?: boolean;
 }
 
 export const DiceRoller: React.FC<DiceRollerProps> = ({
   activePlayer,
   onRollComplete,
   disabled = false,
+  isMyTurn = true,
+  isMultiplayer = false,
 }) => {
   const [isHolding, setIsHolding] = useState(false);
   const [gaugePower, setGaugePower] = useState(0); // 0 to 100
@@ -32,7 +36,7 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
   };
 
   const startHold = () => {
-    if (disabled || isRolling) return;
+    if (disabled || isRolling || (!isMyTurn && isMultiplayer)) return;
     setIsHolding(true);
     setToastComment(null);
     sound.playDiceRattle();
@@ -55,7 +59,7 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
   };
 
   const endHold = () => {
-    if (!isHolding || disabled || isRolling) return;
+    if (!isHolding || disabled || isRolling || (!isMyTurn && isMultiplayer)) return;
     setIsHolding(false);
     if (holdIntervalRef.current) {
       clearInterval(holdIntervalRef.current);
@@ -69,7 +73,6 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
     setIsRolling(true);
     sound.playDiceRattle();
 
-    // Roll animation cycling random numbers
     let rollTicks = 0;
     const rollTimer = setInterval(() => {
       rollTicks++;
@@ -83,7 +86,6 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
         setIsRolling(false);
         sound.playPawnHop();
 
-        // Playful commentary
         let comment = '';
         if (finalNum === 1) {
           comment = '😅 Dadu 1! Santai, pelan-pelan tapi pasti.';
@@ -109,7 +111,6 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
 
   const meter = getMeterLabel(gaugePower);
 
-  // Render 3D-ish dice face
   const renderDiceFace = (val: number | null) => {
     const dots: Record<number, number[]> = {
       1: [4],
@@ -139,7 +140,6 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
     );
   };
 
-  // Minimized docked view
   if (isMinimized) {
     return (
       <div className="fixed bottom-3 right-3 z-30">
@@ -155,11 +155,12 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
     );
   }
 
-  // Center Game Hub ("Dadunya seakan-akan ada di tengah permainan")
+  const canRollNow = !disabled && !isRolling && (isMyTurn || !isMultiplayer);
+
   return (
     <div className="w-full max-w-md mx-auto px-3 my-2 z-20">
       <div className="relative bg-[#FAF6EE] p-3 sm:p-4 rounded-3xl border-4 border-[#1E1B18] shadow-[6px_6px_0px_#1E1B18]">
-        {/* Minimize / Intip Papan Button */}
+        {/* Minimize Button */}
         <button
           type="button"
           onClick={() => setIsMinimized(true)}
@@ -178,7 +179,7 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
           </div>
         </div>
 
-        {/* Toast Comment Banner */}
+        {/* Toast Comment */}
         {toastComment && (
           <div className="mb-2 text-center">
             <span className="inline-block px-3 py-1 rounded-full bg-[#FFFDF8] border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] text-xs font-bold text-[#1E1B18] animate-bounce">
@@ -188,7 +189,6 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
         )}
 
         <div className="flex items-center justify-between gap-3 sm:gap-4">
-          {/* 3D Dice Display */}
           <div className="flex flex-col items-center gap-1">
             {renderDiceFace(diceResult)}
             <span className="text-[10px] font-bold text-gray-700">
@@ -196,54 +196,62 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
             </span>
           </div>
 
-          {/* Controls: Gauge & Hold Button */}
           <div className="flex-1">
-            <div className="mb-1 flex items-center justify-between text-[10px] font-bold">
-              <span className="text-gray-700">Tingkat Kedalaman:</span>
-              <span className={`px-1.5 py-0.5 rounded border border-[#1E1B18] text-[9px] ${meter.color}`}>
-                {meter.text}
-              </span>
-            </div>
+            {canRollNow ? (
+              <>
+                <div className="mb-1 flex items-center justify-between text-[10px] font-bold">
+                  <span className="text-gray-700">Tingkat Kedalaman:</span>
+                  <span className={`px-1.5 py-0.5 rounded border border-[#1E1B18] text-[9px] ${meter.color}`}>
+                    {meter.text}
+                  </span>
+                </div>
 
-            {/* Gauge progress bar */}
-            <div className="w-full h-3 bg-white rounded-full border-2 border-[#1E1B18] overflow-hidden p-0.5 shadow-inner">
-              <div
-                className={`h-full rounded-full transition-all duration-75 ${
-                  gaugePower < 35
-                    ? 'bg-[#80DED9]'
-                    : gaugePower < 75
-                    ? 'bg-[#FFD23F]'
-                    : 'bg-[#FF5964]'
-                }`}
-                style={{ width: `${gaugePower}%` }}
-              />
-            </div>
+                <div className="w-full h-3 bg-white rounded-full border-2 border-[#1E1B18] overflow-hidden p-0.5 shadow-inner">
+                  <div
+                    className={`h-full rounded-full transition-all duration-75 ${
+                      gaugePower < 35
+                        ? 'bg-[#80DED9]'
+                        : gaugePower < 75
+                        ? 'bg-[#FFD23F]'
+                        : 'bg-[#FF5964]'
+                    }`}
+                    style={{ width: `${gaugePower}%` }}
+                  />
+                </div>
 
-            {/* Hold to roll button */}
-            <button
-              type="button"
-              onMouseDown={startHold}
-              onMouseUp={endHold}
-              onTouchStart={startHold}
-              onTouchEnd={endHold}
-              disabled={disabled || isRolling}
-              className={`w-full mt-2 py-2.5 px-3 rounded-2xl border-3 border-[#1E1B18] font-archivo text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 select-none transition-all ${
-                disabled || isRolling
-                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
-                  : isHolding
-                  ? 'bg-[#FF5964] text-white shadow-none translate-x-1 translate-y-1'
-                  : 'bg-[#FFD23F] text-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] hover:-translate-y-0.5'
-              }`}
-            >
-              <Dices className="w-4 h-4" />
-              <span>
-                {isRolling
-                  ? 'Menggelinding...'
-                  : isHolding
-                  ? 'LEPASKAN SEKARANG!'
-                  : 'TAHAN UNTUK KOCOK'}
-              </span>
-            </button>
+                <button
+                  type="button"
+                  onMouseDown={startHold}
+                  onMouseUp={endHold}
+                  onTouchStart={startHold}
+                  onTouchEnd={endHold}
+                  className={`w-full mt-2 py-2.5 px-3 rounded-2xl border-3 border-[#1E1B18] font-archivo text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 select-none transition-all ${
+                    isHolding
+                      ? 'bg-[#FF5964] text-white shadow-none translate-x-1 translate-y-1'
+                      : 'bg-[#FFD23F] text-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] hover:-translate-y-0.5'
+                  }`}
+                >
+                  <Dices className="w-4 h-4" />
+                  <span>
+                    {isRolling
+                      ? 'Menggelinding...'
+                      : isHolding
+                      ? 'LEPASKAN SEKARANG!'
+                      : 'TAHAN UNTUK KOCOK'}
+                  </span>
+                </button>
+              </>
+            ) : (
+              <div className="py-2.5 px-3 rounded-2xl bg-gray-100 border-2 border-dashed border-[#1E1B18]/40 text-center">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-gray-700 mb-0.5">
+                  <Hourglass className="w-3.5 h-3.5 animate-spin text-[#FF5964]" />
+                  <span>Giliran {activePlayer.name}</span>
+                </div>
+                <p className="text-[10px] text-gray-500 font-medium">
+                  Sedang bersiap mengocok dadu dari HP-nya...
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

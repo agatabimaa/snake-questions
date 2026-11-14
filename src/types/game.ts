@@ -51,10 +51,12 @@ export interface Player {
   snakesSlid: number;
 }
 
+export type PlayMode = 'LOCAL_1_DEVICE' | 'ONLINE_ROOM';
 export type GameMode = 'LDR' | 'OFFLINE';
 
 export type GameStatus = 
   | 'LOBBY' 
+  | 'WAITING_ROOM'
   | 'PLAYING' 
   | 'MOVING' 
   | 'QUESTION' 

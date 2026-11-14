@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
-import { Player, GameMode, GameStatus, TileData, Question, AnsweredLog } from './types/game';
+import React, { useState, useEffect, useRef } from 'react';
+import { Player, GameStatus, TileData, Question, AnsweredLog } from './types/game';
 import { generate49Tiles, getTileCoordinates, TOTAL_TILES } from './utils/board';
 import { QuestionManager } from './utils/questionManager';
 import { sound } from './utils/audio';
+import { multiplayer } from './utils/multiplayer';
 
 import { Header } from './components/Header';
 import { Lobby } from './components/Lobby';
@@ -15,7 +16,8 @@ import { VictoryModal } from './components/VictoryModal';
 
 export const App: React.FC = () => {
   const [gameStatus, setGameStatus] = useState<GameStatus>('LOBBY');
-  const [gameMode, setGameMode] = useState<GameMode>('LDR');
+  const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [myRole, setMyRole] = useState<'p1' | 'p2' | 'local'>('local');
 
   // Players
   const [player1, setPlayer1] = useState<Player>({
@@ -74,6 +76,7 @@ export const App: React.FC = () => {
 
   const activePlayer = currentTurn === 'p1' ? player1 : player2;
   const otherPlayer = currentTurn === 'p1' ? player2 : player1;
+  const isMyTurn = !isMultiplayer || myRole === currentTurn;
 
   const handleToggleSound = () => {
     sound.enabled = !sound.enabled;
@@ -85,28 +88,99 @@ export const App: React.FC = () => {
     setBgmEnabled(active);
   };
 
-  const handleStartGame = (p1: Player, p2: Player, mode: GameMode) => {
+  // Start Local 1-Device Game
+  const handleStartLocalGame = (p1: Player, p2: Player) => {
     setPlayer1(p1);
     setPlayer2(p2);
-    setGameMode(mode);
+    setIsMultiplayer(false);
+    setMyRole('local');
     setCurrentTurn('p1');
     setTurnCount(1);
     setLogs([]);
     setWinner(null);
     setAnimatingPawn(null);
 
-    qManagerRef.current.setMode(mode);
+    qManagerRef.current.setMode('OFFLINE');
     setGameStatus('PLAYING');
   };
 
+  // Start Online Multiplayer Game
+  const handleStartOnlineGame = (me: Player, partner: Player, isHost: boolean) => {
+    setIsMultiplayer(true);
+    setMyRole(isHost ? 'p1' : 'p2');
+    setCurrentTurn('p1');
+    setTurnCount(1);
+    setLogs([]);
+    setWinner(null);
+    setAnimatingPawn(null);
+
+    if (isHost) {
+      setPlayer1(me);
+      setPlayer2(partner);
+    } else {
+      setPlayer1(partner);
+      setPlayer2(me);
+    }
+
+    qManagerRef.current.setMode('LDR');
+    setGameStatus('PLAYING');
+  };
+
+  // Switch turn
   const switchTurn = () => {
     setCurrentTurn((prev) => (prev === 'p1' ? 'p2' : 'p1'));
     setTurnCount((prev) => prev + 1);
     setGameStatus('PLAYING');
   };
 
-  // Dice roll step-by-step movement
-  const handleRollComplete = (diceValue: number) => {
+  // Listen to multiplayer network events
+  useEffect(() => {
+    const unsubscribe = multiplayer.onEvent((event) => {
+      if (event.type === 'DICE_ROLL') {
+        executeMovement(event.value);
+      } else if (event.type === 'QUESTION_OPENED') {
+        setCurrentQuestion(event.question);
+        setGameStatus('QUESTION');
+      } else if (event.type === 'DARE_OPENED') {
+        setCurrentDare(event.dare);
+        setGameStatus('ACTION_DARE');
+      } else if (event.type === 'QUESTION_REROLLED') {
+        setCurrentQuestion(event.question);
+      } else if (event.type === 'DARE_REROLLED') {
+        setCurrentDare(event.dare);
+      } else if (event.type === 'TURN_COMPLETED') {
+        if (event.log) {
+          setLogs((prev) => [event.log!, ...prev]);
+        }
+        setCurrentQuestion(null);
+        setCurrentDare(null);
+        setCurrentTurn(event.nextTurn);
+        setTurnCount((prev) => prev + 1);
+        setGameStatus('PLAYING');
+      } else if (event.type === 'RESTART_GAME') {
+        setGameStatus('LOBBY');
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [currentTurn]);
+
+  // Local player rolls dice
+  const handleLocalRollComplete = (diceValue: number) => {
+    if (isMultiplayer) {
+      multiplayer.send({
+        type: 'DICE_ROLL',
+        value: diceValue,
+        power: 50,
+      });
+    }
+    executeMovement(diceValue);
+  };
+
+  // Execute step-by-step pawn movement (runs on both devices identically)
+  const executeMovement = (diceValue: number) => {
     setGameStatus('MOVING');
 
     const startPos = activePlayer.position;
@@ -145,7 +219,6 @@ export const App: React.FC = () => {
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / durationMs);
 
-      // Smooth easeInOutQuad
       const easeProgress = progress < 0.5 
         ? 2 * progress * progress 
         : 1 - Math.pow(-2 * progress + 2, 2) / 2;
@@ -174,7 +247,7 @@ export const App: React.FC = () => {
   const handleTileLanded = (tileId: number) => {
     const tile = tiles.find((t) => t.id === tileId);
     if (!tile) {
-      switchTurn();
+      advanceTurn();
       return;
     }
 
@@ -185,7 +258,7 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Ladder: visual smooth ascent animation
+    // Ladder
     if (tile.type === 'LADDER' && tile.targetTile) {
       sound.playLadderClimb();
       const target = tile.targetTile;
@@ -198,13 +271,12 @@ export const App: React.FC = () => {
         }
 
         const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
-        setCurrentQuestion(q);
-        setGameStatus('QUESTION');
+        openQuestionModal(q);
       });
       return;
     }
 
-    // Snake: visual smooth slide animation
+    // Snake
     if (tile.type === 'SNAKE' && tile.targetTile) {
       sound.playSnakeSlide();
       const target = tile.targetTile;
@@ -217,8 +289,7 @@ export const App: React.FC = () => {
         }
 
         const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
-        setCurrentQuestion(q);
-        setGameStatus('QUESTION');
+        openQuestionModal(q);
       });
       return;
     }
@@ -227,42 +298,62 @@ export const App: React.FC = () => {
     if (tile.type === 'BOY') {
       sound.playModalPop();
       const q = qManagerRef.current.drawQuestion('BOY');
-      setCurrentQuestion(q);
-      setGameStatus('QUESTION');
+      openQuestionModal(q);
       return;
     }
 
     if (tile.type === 'GIRL') {
       sound.playModalPop();
       const q = qManagerRef.current.drawQuestion('GIRL');
-      setCurrentQuestion(q);
-      setGameStatus('QUESTION');
+      openQuestionModal(q);
       return;
     }
 
     if (tile.type === 'DEEPTALK') {
       sound.playModalPop();
       const q = qManagerRef.current.drawQuestion('DEEPTALK');
-      setCurrentQuestion(q);
-      setGameStatus('QUESTION');
+      openQuestionModal(q);
       return;
     }
 
     if (tile.type === 'ACTION') {
       sound.playModalPop();
       const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
-      setCurrentDare(dare);
-      setGameStatus('ACTION_DARE');
+      openDareModal(dare);
       return;
     }
 
     // Chill tile
-    switchTurn();
+    advanceTurn();
   };
 
+  const openQuestionModal = (q: Question) => {
+    setCurrentQuestion(q);
+    setGameStatus('QUESTION');
+    if (isMultiplayer) {
+      multiplayer.send({
+        type: 'QUESTION_OPENED',
+        question: q,
+      });
+    }
+  };
+
+  const openDareModal = (dare: Question) => {
+    setCurrentDare(dare);
+    setGameStatus('ACTION_DARE');
+    if (isMultiplayer) {
+      multiplayer.send({
+        type: 'DARE_OPENED',
+        dare: dare,
+      });
+    }
+  };
+
+  // Complete question answer
   const handleAnswerComplete = () => {
+    let newLog: AnsweredLog | undefined = undefined;
     if (currentQuestion) {
-      const newLog: AnsweredLog = {
+      newLog = {
         id: `log-${Date.now()}`,
         playerName: activePlayer.name,
         playerAvatar: activePlayer.avatar,
@@ -271,7 +362,7 @@ export const App: React.FC = () => {
         turnNumber: turnCount,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setLogs((prev) => [newLog, ...prev]);
+      setLogs((prev) => [newLog!, ...prev]);
 
       if (currentTurn === 'p1') {
         setPlayer1((prev) => ({ ...prev, questionsAnswered: prev.questionsAnswered + 1 }));
@@ -281,18 +372,25 @@ export const App: React.FC = () => {
     }
 
     setCurrentQuestion(null);
-    switchTurn();
+    advanceTurn(newLog);
   };
 
   const handleRerollQuestion = () => {
     if (!currentQuestion) return;
     const newQ = qManagerRef.current.reroll(currentQuestion.category, currentQuestion.id);
     setCurrentQuestion(newQ);
+    if (isMultiplayer) {
+      multiplayer.send({
+        type: 'QUESTION_REROLLED',
+        question: newQ,
+      });
+    }
   };
 
   const handleDareComplete = () => {
+    let newLog: AnsweredLog | undefined = undefined;
     if (currentDare) {
-      const newLog: AnsweredLog = {
+      newLog = {
         id: `log-${Date.now()}`,
         playerName: activePlayer.name,
         playerAvatar: activePlayer.avatar,
@@ -301,19 +399,40 @@ export const App: React.FC = () => {
         turnNumber: turnCount,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setLogs((prev) => [newLog, ...prev]);
+      setLogs((prev) => [newLog!, ...prev]);
     }
     setCurrentDare(null);
-    switchTurn();
+    advanceTurn(newLog);
   };
 
   const handleRerollDare = () => {
     if (!currentDare) return;
     const newDare = qManagerRef.current.reroll('VIRTUAL_DARE', currentDare.id);
     setCurrentDare(newDare);
+    if (isMultiplayer) {
+      multiplayer.send({
+        type: 'DARE_REROLLED',
+        dare: newDare,
+      });
+    }
+  };
+
+  const advanceTurn = (log?: AnsweredLog) => {
+    const nextTurn = currentTurn === 'p1' ? 'p2' : 'p1';
+    if (isMultiplayer) {
+      multiplayer.send({
+        type: 'TURN_COMPLETED',
+        nextTurn,
+        log,
+      });
+    }
+    switchTurn();
   };
 
   const handleRestart = () => {
+    if (isMultiplayer) {
+      multiplayer.send({ type: 'RESTART_GAME' });
+    }
     setGameStatus('LOBBY');
   };
 
@@ -337,21 +456,26 @@ export const App: React.FC = () => {
       {/* Main Game Screen */}
       <main className="flex-1 flex flex-col items-center justify-center p-2 sm:p-4">
         {gameStatus === 'LOBBY' && (
-          <Lobby onStartGame={handleStartGame} />
+          <Lobby
+            onStartLocalGame={handleStartLocalGame}
+            onStartOnlineGame={handleStartOnlineGame}
+          />
         )}
 
         {gameStatus !== 'LOBBY' && (
           <div className="w-full max-w-xl flex flex-col items-center">
-            {/* 1. Pusat Dadu di Tengah Permainan (Center Game Hub) */}
+            {/* 1. Pusat Dadu di Tengah Permainan */}
             <DiceRoller
               activePlayer={activePlayer}
-              onRollComplete={handleRollComplete}
+              onRollComplete={handleLocalRollComplete}
               disabled={
                 gameStatus === 'MOVING' ||
                 gameStatus === 'QUESTION' ||
                 gameStatus === 'ACTION_DARE' ||
                 gameStatus === 'VICTORY'
               }
+              isMyTurn={isMyTurn}
+              isMultiplayer={isMultiplayer}
             />
 
             {/* 2. Visual 49-Tile (7x7) Board with SVG Snakes & Ladders */}

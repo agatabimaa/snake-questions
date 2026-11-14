@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Player, GameMode, GameStatus, TileData, Question, AnsweredLog } from './types/game';
-import { generateBoardTiles } from './utils/board';
+import { generate100Tiles, getTileCoordinates } from './utils/board';
 import { QuestionManager } from './utils/questionManager';
 import { sound } from './utils/audio';
 
@@ -50,7 +50,14 @@ export const App: React.FC = () => {
 
   const [currentTurn, setCurrentTurn] = useState<'p1' | 'p2'>('p1');
   const [turnCount, setTurnCount] = useState<number>(1);
-  const [tiles] = useState<TileData[]>(generateBoardTiles());
+  const [tiles] = useState<TileData[]>(generate100Tiles());
+
+  // Visual pawn animation during ladder/snake slide
+  const [animatingPawn, setAnimatingPawn] = useState<{
+    playerId: 'p1' | 'p2';
+    xPercent: number;
+    yPercent: number;
+  } | null>(null);
 
   // Questions and Modals
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
@@ -63,13 +70,11 @@ export const App: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [bgmEnabled, setBgmEnabled] = useState(false);
 
-  // Question Manager ref (maintains random pools)
   const qManagerRef = useRef<QuestionManager>(new QuestionManager('LDR'));
 
   const activePlayer = currentTurn === 'p1' ? player1 : player2;
   const otherPlayer = currentTurn === 'p1' ? player2 : player1;
 
-  // Toggle audio
   const handleToggleSound = () => {
     sound.enabled = !sound.enabled;
     setSoundEnabled(sound.enabled);
@@ -80,7 +85,6 @@ export const App: React.FC = () => {
     setBgmEnabled(active);
   };
 
-  // Start game from Lobby
   const handleStartGame = (p1: Player, p2: Player, mode: GameMode) => {
     setPlayer1(p1);
     setPlayer2(p2);
@@ -89,26 +93,25 @@ export const App: React.FC = () => {
     setTurnCount(1);
     setLogs([]);
     setWinner(null);
+    setAnimatingPawn(null);
 
     qManagerRef.current.setMode(mode);
     setGameStatus('PLAYING');
   };
 
-  // Switch turn
   const switchTurn = () => {
     setCurrentTurn((prev) => (prev === 'p1' ? 'p2' : 'p1'));
     setTurnCount((prev) => prev + 1);
     setGameStatus('PLAYING');
   };
 
-  // Dice roll completed
+  // Dice roll step-by-step movement
   const handleRollComplete = (diceValue: number) => {
     setGameStatus('MOVING');
 
     const startPos = activePlayer.position;
-    const targetPos = Math.min(50, startPos + diceValue);
+    const targetPos = Math.min(100, startPos + diceValue);
 
-    // Animate pawn step-by-step
     let currentStep = startPos;
     const stepInterval = setInterval(() => {
       currentStep++;
@@ -124,10 +127,50 @@ export const App: React.FC = () => {
         clearInterval(stepInterval);
         setTimeout(() => handleTileLanded(targetPos), 300);
       }
-    }, 180);
+    }, 160);
   };
 
-  // Process landed tile
+  // Smooth animation along ladder or snake
+  const animatePawnMovement = (
+    fromTile: number,
+    toTile: number,
+    durationMs: number,
+    onFinish: () => void
+  ) => {
+    const start = getTileCoordinates(fromTile);
+    const end = getTileCoordinates(toTile);
+    const startTime = performance.now();
+
+    const frame = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+
+      // Smooth easeInOutQuad
+      const easeProgress = progress < 0.5 
+        ? 2 * progress * progress 
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+      const currentX = (start.x + (end.x - start.x) * easeProgress) / 10;
+      const currentY = (start.y + (end.y - start.y) * easeProgress) / 10;
+
+      setAnimatingPawn({
+        playerId: currentTurn,
+        xPercent: currentX,
+        yPercent: currentY,
+      });
+
+      if (progress < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        setAnimatingPawn(null);
+        onFinish();
+      }
+    };
+
+    requestAnimationFrame(frame);
+  };
+
+  // Handle tile landed
   const handleTileLanded = (tileId: number) => {
     const tile = tiles.find((t) => t.id === tileId);
     if (!tile) {
@@ -135,50 +178,52 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Check Victory
-    if (tile.type === 'FINISH' || tileId >= 50) {
+    // Finish
+    if (tile.type === 'FINISH' || tileId >= 100) {
       setWinner(activePlayer);
       setGameStatus('VICTORY');
       return;
     }
 
-    // Check Ladder
+    // Ladder: visual smooth ascent animation
     if (tile.type === 'LADDER' && tile.targetTile) {
       sound.playLadderClimb();
       const target = tile.targetTile;
-      setTimeout(() => {
+
+      animatePawnMovement(tileId, target, 850, () => {
         if (currentTurn === 'p1') {
           setPlayer1((prev) => ({ ...prev, position: target, laddersClimbed: prev.laddersClimbed + 1 }));
         } else {
           setPlayer2((prev) => ({ ...prev, position: target, laddersClimbed: prev.laddersClimbed + 1 }));
         }
-        // Draw appreciation question
+
         const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
         setCurrentQuestion(q);
         setGameStatus('QUESTION');
-      }, 400);
+      });
       return;
     }
 
-    // Check Snake
+    // Snake: visual smooth slide animation
     if (tile.type === 'SNAKE' && tile.targetTile) {
       sound.playSnakeSlide();
       const target = tile.targetTile;
-      setTimeout(() => {
+
+      animatePawnMovement(tileId, target, 950, () => {
         if (currentTurn === 'p1') {
           setPlayer1((prev) => ({ ...prev, position: target, snakesSlid: prev.snakesSlid + 1 }));
         } else {
           setPlayer2((prev) => ({ ...prev, position: target, snakesSlid: prev.snakesSlid + 1 }));
         }
-        // Draw snake reflection question
+
         const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
         setCurrentQuestion(q);
         setGameStatus('QUESTION');
-      }, 400);
+      });
       return;
     }
 
-    // Boy tile
+    // Question tiles
     if (tile.type === 'BOY') {
       sound.playModalPop();
       const q = qManagerRef.current.drawQuestion('BOY');
@@ -187,7 +232,6 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Girl tile
     if (tile.type === 'GIRL') {
       sound.playModalPop();
       const q = qManagerRef.current.drawQuestion('GIRL');
@@ -196,7 +240,6 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Deep talk tile
     if (tile.type === 'DEEPTALK') {
       sound.playModalPop();
       const q = qManagerRef.current.drawQuestion('DEEPTALK');
@@ -205,7 +248,6 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Action Dare tile
     if (tile.type === 'ACTION') {
       sound.playModalPop();
       const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
@@ -218,7 +260,6 @@ export const App: React.FC = () => {
     switchTurn();
   };
 
-  // Complete Question Answer
   const handleAnswerComplete = () => {
     if (currentQuestion) {
       const newLog: AnsweredLog = {
@@ -243,14 +284,12 @@ export const App: React.FC = () => {
     switchTurn();
   };
 
-  // Reroll Question
   const handleRerollQuestion = () => {
     if (!currentQuestion) return;
     const newQ = qManagerRef.current.reroll(currentQuestion.category, currentQuestion.id);
     setCurrentQuestion(newQ);
   };
 
-  // Complete Action Dare
   const handleDareComplete = () => {
     if (currentDare) {
       const newLog: AnsweredLog = {
@@ -268,14 +307,12 @@ export const App: React.FC = () => {
     switchTurn();
   };
 
-  // Reroll Dare
   const handleRerollDare = () => {
     if (!currentDare) return;
     const newDare = qManagerRef.current.reroll('VIRTUAL_DARE', currentDare.id);
     setCurrentDare(newDare);
   };
 
-  // Restart to Lobby
   const handleRestart = () => {
     setGameStatus('LOBBY');
   };
@@ -297,28 +334,35 @@ export const App: React.FC = () => {
         historyCount={logs.length}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center">
+      {/* Main Game Screen */}
+      <main className="flex-1 flex flex-col items-center justify-center p-2 sm:p-4">
         {gameStatus === 'LOBBY' && (
           <Lobby onStartGame={handleStartGame} />
         )}
 
         {gameStatus !== 'LOBBY' && (
-          <div className="w-full flex flex-col items-center pb-24 sm:pb-28">
+          <div className="w-full max-w-2xl flex flex-col items-center">
+            {/* 1. Pusat Dadu di Tengah Permainan (Center Game Hub) */}
+            <DiceRoller
+              activePlayer={activePlayer}
+              onRollComplete={handleRollComplete}
+              disabled={
+                gameStatus === 'MOVING' ||
+                gameStatus === 'QUESTION' ||
+                gameStatus === 'ACTION_DARE' ||
+                gameStatus === 'VICTORY'
+              }
+            />
+
+            {/* 2. Visual 100-Tile Board with SVG Snakes & Ladders */}
             <Board
               tiles={tiles}
               player1={player1}
               player2={player2}
+              animatingPawn={animatingPawn}
               onTileClick={(tile) => {
                 sound.playClick();
               }}
-            />
-
-            {/* Bottom Floating Dice Controller */}
-            <DiceRoller
-              activePlayer={activePlayer}
-              onRollComplete={handleRollComplete}
-              disabled={gameStatus === 'MOVING' || gameStatus === 'QUESTION' || gameStatus === 'ACTION_DARE' || gameStatus === 'VICTORY'}
             />
           </div>
         )}

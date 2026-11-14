@@ -1,11 +1,17 @@
 import React from 'react';
 import { Player, TileData } from '../types/game';
-import { getTileGridPosition } from '../utils/board';
+import { BoardOverlay } from './BoardOverlay';
+import { getTileColor } from '../utils/board';
 
 interface BoardProps {
   tiles: TileData[];
   player1: Player;
   player2: Player;
+  animatingPawn?: {
+    playerId: 'p1' | 'p2';
+    xPercent: number;
+    yPercent: number;
+  } | null;
   onTileClick?: (tile: TileData) => void;
 }
 
@@ -13,155 +19,152 @@ export const Board: React.FC<BoardProps> = ({
   tiles,
   player1,
   player2,
+  animatingPawn,
   onTileClick,
 }) => {
-  // Sort tiles to render from Top (row 9, tile 50) down to Bottom (row 0, tile 1)
-  // Grid layout: 10 rows (numbered 0 at top to 9 at bottom), 5 columns (0 to 4)
+  // 100 Tiles: 10 rows x 10 columns
+  // Render top row (row 9, tiles 100 down to 91) to bottom row (row 0, tiles 1 to 10)
+  const rows = [];
+  for (let r = 9; r >= 0; r--) {
+    const rowTiles = [];
+    for (let c = 0; c < 10; c++) {
+      // Calculate tile ID
+      const tileId = r % 2 === 0
+        ? r * 10 + c + 1
+        : r * 10 + (9 - c) + 1;
 
-  const getTileBg = (tile: TileData) => {
-    switch (tile.type) {
-      case 'START':
-        return 'bg-[#FFFDF8]';
-      case 'FINISH':
-        return 'bg-gradient-to-br from-[#FFD23F] via-[#FF758F] to-[#80DED9]';
-      case 'LADDER':
-        return 'bg-[#D8F3DC] border-[#2D6A4F]';
-      case 'SNAKE':
-        return 'bg-[#FFE5D9] border-[#D90429]';
-      case 'BOY':
-        return 'bg-[#E0F2FE]';
-      case 'GIRL':
-        return 'bg-[#FFF0F3]';
-      case 'DEEPTALK':
-        return 'bg-[#F3E8FF]';
-      case 'ACTION':
-        return 'bg-[#FEF3C7]';
-      case 'CHILL':
-      default:
-        return 'bg-[#FFFFFF]';
+      const tile = tiles.find((t) => t.id === tileId) || {
+        id: tileId,
+        type: 'CHILL',
+        title: `Petak ${tileId}`,
+      };
+      rowTiles.push(tile);
     }
-  };
+    rows.push(rowTiles);
+  }
 
-  const getTileBadge = (tile: TileData) => {
+  const getTileIcon = (tile: TileData) => {
     switch (tile.type) {
       case 'START':
-        return { text: 'START', color: 'bg-[#FFD23F]', icon: '🏁' };
+        return '👉';
       case 'FINISH':
-        return { text: 'FINISH', color: 'bg-[#FF5964] text-white', icon: '🏆' };
+        return '🏠';
       case 'LADDER':
-        return { text: `➔ ${tile.targetTile}`, color: 'bg-[#06D6A0] text-black', icon: '🪜' };
+        return '🪜';
       case 'SNAKE':
-        return { text: `➔ ${tile.targetTile}`, color: 'bg-[#FF5964] text-white', icon: '🐍' };
+        return '🐍';
       case 'BOY':
-        return { text: 'COWOK', color: 'bg-[#80DED9]', icon: '👦' };
+        return '👦';
       case 'GIRL':
-        return { text: 'CEWEK', color: 'bg-[#FF758F] text-white', icon: '👧' };
+        return '👧';
       case 'DEEPTALK':
-        return { text: 'DEEP', color: 'bg-[#B5A6C9] text-black', icon: '💜' };
+        return '💜';
       case 'ACTION':
-        return { text: 'DARE', color: 'bg-[#FFD23F]', icon: '💌' };
+        return '💌';
       case 'CHILL':
       default:
-        return { text: 'SANTAI', color: 'bg-gray-200 text-gray-700', icon: '☕' };
+        return null;
     }
   };
 
   return (
-    <div className="w-full max-w-xl mx-auto p-2 sm:p-4">
-      {/* Legend Bar */}
-      <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5 text-[10px] sm:text-[11px] font-bold">
-        <span className="px-2 py-0.5 rounded-full bg-[#E0F2FE] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
-          👦 Soal Cowok
+    <div className="w-full max-w-2xl mx-auto p-1.5 sm:p-3 select-none">
+      {/* Category Legend Bar */}
+      <div className="mb-2 flex flex-wrap items-center justify-center gap-1 sm:gap-2 text-[9px] sm:text-[11px] font-bold">
+        <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-[#E0F2FE] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
+          👦 Cowok
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-[#FFF0F3] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
-          👧 Soal Cewek
+        <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-[#FFF0F3] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
+          👧 Cewek
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-[#F3E8FF] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
+        <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-[#F3E8FF] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
           💜 Deep Talk
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-[#D8F3DC] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
-          🪜 Tangga
+        <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-[#DCFCE7] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
+          🪜 Naik Tangga
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-[#FFE5D9] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
-          🐍 Ular
+        <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-[#FFE5D9] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
+          🐍 Turun Ular
         </span>
-        <span className="px-2 py-0.5 rounded-full bg-[#FEF3C7] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
+        <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-[#FEF3C7] border border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center gap-1">
           💌 Love Dare
         </span>
       </div>
 
-      {/* Main Board Container */}
-      <div className="relative bg-[#FAF6EE] p-2 sm:p-3 rounded-2xl border-4 border-[#1E1B18] shadow-[6px_6px_0px_#1E1B18]">
-        {/* Board 10x5 Grid */}
-        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-          {Array.from({ length: 50 }, (_, i) => {
-            // Display row 9 (tiles 46-50) down to row 0 (tiles 1-5)
-            // Reverse so tile 50 is at top
-            const displayIndex = 49 - i;
-            const rowFromBottom = Math.floor(displayIndex / 5);
-            const colInRow = displayIndex % 5;
-            const tileId = rowFromBottom % 2 === 0 
-              ? rowFromBottom * 5 + colInRow + 1 
-              : rowFromBottom * 5 + (4 - colInRow) + 1;
-
-            const tile = tiles.find((t) => t.id === tileId) || {
-              id: tileId,
-              type: 'CHILL',
-              title: `Petak ${tileId}`,
-            };
-
-            const isP1Here = player1.position === tile.id;
-            const isP2Here = player2.position === tile.id;
-            const badge = getTileBadge(tile);
+      {/* Main Board Grid with SVG Overlay */}
+      <div className="relative aspect-square w-full bg-[#FAF6EE] rounded-2xl border-4 sm:border-[5px] border-[#1E1B18] shadow-[6px_6px_0px_#1E1B18] overflow-hidden">
+        {/* 10x10 Grid Cells */}
+        <div className="absolute inset-0 grid grid-cols-10 grid-rows-10">
+          {rows.flat().map((tile) => {
+            const isP1StaticHere = !animatingPawn && player1.position === tile.id;
+            const isP2StaticHere = !animatingPawn && player2.position === tile.id;
+            const icon = getTileIcon(tile);
+            const bgColor = getTileColor(tile.id);
 
             return (
               <div
                 key={`tile-${tile.id}`}
                 onClick={() => onTileClick && onTileClick(tile)}
-                className={`relative aspect-square rounded-xl border-2 sm:border-3 border-[#1E1B18] p-1 flex flex-col justify-between transition-all select-none shadow-[2px_2px_0px_#1E1B18] hover:translate-y-[-1px] ${getTileBg(
-                  tile
-                )}`}
+                style={{ backgroundColor: bgColor }}
+                className="relative border-[0.5px] sm:border border-[#1E1B18]/40 p-0.5 sm:p-1 flex flex-col justify-between hover:brightness-95 transition-all"
               >
-                {/* Tile Number Header */}
+                {/* Tile Number */}
                 <div className="flex items-center justify-between leading-none">
-                  <span className="font-archivo text-[11px] sm:text-xs text-[#1E1B18]">
+                  <span className="font-archivo text-[9px] sm:text-xs text-[#1E1B18] font-bold drop-shadow-sm">
                     {tile.id}
                   </span>
-                  <span className="text-xs sm:text-sm">{badge.icon}</span>
+                  {icon && (
+                    <span className="text-[9px] sm:text-xs leading-none drop-shadow-sm">
+                      {icon}
+                    </span>
+                  )}
                 </div>
 
-                {/* Pawns Overlay */}
-                <div className="my-auto flex items-center justify-center gap-1 z-10">
-                  {isP1Here && (
+                {/* Static Pawns on Tile */}
+                <div className="my-auto flex items-center justify-center gap-0.5 z-20">
+                  {isP1StaticHere && (
                     <div
-                      className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-[#80DED9] border-2 border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center justify-center text-xs sm:text-base animate-bounce"
+                      className="w-5 h-5 sm:w-7 sm:h-7 rounded-full bg-[#80DED9] border-2 border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center justify-center text-[10px] sm:text-sm animate-bounce"
                       title={`${player1.name}`}
                     >
                       {player1.avatar}
                     </div>
                   )}
-                  {isP2Here && (
+                  {isP2StaticHere && (
                     <div
-                      className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-[#FF758F] text-white border-2 border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center justify-center text-xs sm:text-base animate-bounce"
+                      className="w-5 h-5 sm:w-7 sm:h-7 rounded-full bg-[#FF758F] text-white border-2 border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] flex items-center justify-center text-[10px] sm:text-sm animate-bounce"
                       title={`${player2.name}`}
                     >
                       {player2.avatar}
                     </div>
                   )}
                 </div>
-
-                {/* Subtext / Target Badge */}
-                <div className="flex justify-center">
-                  <span
-                    className={`text-[8px] sm:text-[9px] font-bold px-1 rounded border border-[#1E1B18] truncate max-w-full leading-tight ${badge.color}`}
-                  >
-                    {badge.text}
-                  </span>
-                </div>
               </div>
             );
           })}
         </div>
+
+        {/* Visual Snakes & Ladders SVG Overlay */}
+        <BoardOverlay />
+
+        {/* Dynamic Animating Pawn (during smooth climb or slide) */}
+        {animatingPawn && (
+          <div
+            className="absolute z-30 -translate-x-1/2 -translate-y-1/2 transition-all duration-75 pointer-events-none"
+            style={{
+              left: `${animatingPawn.xPercent}%`,
+              top: `${animatingPawn.yPercent}%`,
+            }}
+          >
+            <div
+              className={`w-7 h-7 sm:w-9 sm:h-9 rounded-full border-3 border-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] flex items-center justify-center text-sm sm:text-lg animate-pulse ${
+                animatingPawn.playerId === 'p1' ? 'bg-[#80DED9]' : 'bg-[#FF758F] text-white'
+              }`}
+            >
+              {animatingPawn.playerId === 'p1' ? player1.avatar : player2.avatar}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

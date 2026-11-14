@@ -1,4 +1,4 @@
-import { Peer, DataConnection } from 'peerjs';
+import mqtt, { MqttClient } from 'mqtt';
 import { Player, Question, AnsweredLog } from '../types/game';
 
 export type NetworkEvent =
@@ -12,9 +12,8 @@ export type NetworkEvent =
   | { type: 'TURN_COMPLETED'; nextTurn: 'p1' | 'p2'; log?: AnsweredLog }
   | { type: 'RESTART_GAME' };
 
-export class MultiplayerService {
-  private peer: Peer | null = null;
-  private conn: DataConnection | null = null;
+class MultiplayerService {
+  private client: MqttClient | null = null;
   public isHost: boolean = false;
   public roomCode: string = '';
   private eventHandlers: ((event: NetworkEvent) => void)[] = [];
@@ -31,107 +30,164 @@ export class MultiplayerService {
     return result;
   }
 
-  // Create room as Host (Pemain 1)
-  public createRoom(code: string): Promise<string> {
+  // Connect to EMQX / HiveMQ public secure WebSockets
+  private connectBroker(): Promise<MqttClient> {
     return new Promise((resolve, reject) => {
-      this.isHost = true;
-      this.roomCode = code.toUpperCase();
-      const peerId = `sq-love-${this.roomCode.toLowerCase()}`;
+      if (this.client && this.client.connected) {
+        resolve(this.client);
+        return;
+      }
 
       this.cleanup();
 
-      try {
-        this.peer = new Peer(peerId, {
-          debug: 1,
-        });
+      const clientId = `sq-${Math.random().toString(36).substring(2, 9)}`;
+      const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+        clientId,
+        clean: true,
+        connectTimeout: 8000,
+        reconnectPeriod: 2000,
+      });
 
-        this.peer.on('open', (id) => {
-          resolve(this.roomCode);
-        });
+      const timer = setTimeout(() => {
+        reject(new Error('Koneksi ke server room timeout.'));
+      }, 9000);
 
-        this.peer.on('connection', (connection) => {
-          this.conn = connection;
-          this.setupConnection();
-        });
+      client.on('connect', () => {
+        clearTimeout(timer);
+        this.client = client;
+        this.setupMessageHandler();
+        this.onConnectedHandlers.forEach((cb) => cb());
+        resolve(client);
+      });
 
-        this.peer.on('error', (err) => {
-          console.error('PeerJS Host Error:', err);
-          reject(err);
-        });
-      } catch (e) {
-        reject(e);
-      }
+      client.on('error', (err) => {
+        clearTimeout(timer);
+        console.error('MQTT error:', err);
+        reject(err);
+      });
+
+      client.on('close', () => {
+        this.onDisconnectedHandlers.forEach((cb) => cb());
+      });
     });
   }
 
-  // Join room as Guest (Pemain 2)
-  public joinRoom(code: string): Promise<void> {
+  // Host creates room and publishes retained room info
+  public async createRoom(code: string, hostPlayer: Player): Promise<string> {
+    this.isHost = true;
+    this.roomCode = code.toUpperCase();
+    const client = await this.connectBroker();
+
+    const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
+    const topicGuest = `snake-questions/v2/${this.roomCode}/guest`;
+    const topicInfo = `snake-questions/v2/${this.roomCode}/info`;
+
     return new Promise((resolve, reject) => {
-      this.isHost = false;
-      this.roomCode = code.toUpperCase();
-      const hostPeerId = `sq-love-${this.roomCode.toLowerCase()}`;
-
-      this.cleanup();
-
-      try {
-        // Random guest peer ID
-        this.peer = new Peer({
-          debug: 1,
-        });
-
-        this.peer.on('open', () => {
-          if (!this.peer) return;
-          const connection = this.peer.connect(hostPeerId, {
-            reliable: true,
-          });
-          this.conn = connection;
-          this.setupConnection();
-
-          connection.on('open', () => {
-            resolve();
-          });
-
-          connection.on('error', (err) => {
-            reject(err);
-          });
-        });
-
-        this.peer.on('error', (err) => {
-          console.error('PeerJS Guest Error:', err);
+      // Subscribe to events and guest notifications
+      client.subscribe([topicEvents, topicGuest], (err) => {
+        if (err) {
           reject(err);
-        });
+          return;
+        }
+
+        // Publish retained room info so guest can join anytime
+        client.publish(
+          topicInfo,
+          JSON.stringify({
+            roomCode: this.roomCode,
+            host: hostPlayer,
+            createdAt: Date.now(),
+          }),
+          { retain: true, qos: 1 },
+          () => {
+            resolve(this.roomCode);
+          }
+        );
+      });
+    });
+  }
+
+  // Guest joins an existing room and retrieves host info
+  public async joinRoom(code: string, guestPlayer: Player): Promise<Player> {
+    this.isHost = false;
+    this.roomCode = code.toUpperCase();
+    const client = await this.connectBroker();
+
+    const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
+    const topicGuest = `snake-questions/v2/${this.roomCode}/guest`;
+    const topicInfo = `snake-questions/v2/${this.roomCode}/info`;
+
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+
+      // Timeout if room doesn't exist after 6 seconds
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          reject(new Error('Room tidak ditemukan atau kode salah. Pastikan pasangan sudah membuat room.'));
+        }
+      }, 6500);
+
+      // Listen specifically for the retained info topic
+      const checkHandler = (topic: string, payload: Buffer) => {
+        if (topic === topicInfo) {
+          try {
+            const data = JSON.parse(payload.toString());
+            if (data && data.host) {
+              resolved = true;
+              clearTimeout(timeout);
+              client.removeListener('message', checkHandler);
+
+              // Notify host that guest joined with retain: true
+              client.publish(
+                topicGuest,
+                JSON.stringify({
+                  type: 'GUEST_JOINED',
+                  player: guestPlayer,
+                }),
+                { retain: true, qos: 1 }
+              );
+
+              resolve(data.host as Player);
+            }
+          } catch (e) {
+            // ignore parse error
+          }
+        }
+      };
+
+      client.on('message', checkHandler);
+
+      // Subscribe to all room channels
+      client.subscribe([topicInfo, topicEvents, topicGuest], (err) => {
+        if (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+    });
+  }
+
+  // Setup message router
+  private setupMessageHandler() {
+    if (!this.client) return;
+
+    this.client.on('message', (topic: string, payload: Buffer) => {
+      try {
+        const msg = JSON.parse(payload.toString());
+        if (msg && msg.type) {
+          this.eventHandlers.forEach((handler) => handler(msg as NetworkEvent));
+        }
       } catch (e) {
-        reject(e);
+        // ignore non-json
       }
     });
   }
 
-  private setupConnection() {
-    if (!this.conn) return;
-
-    this.conn.on('open', () => {
-      this.onConnectedHandlers.forEach((cb) => cb());
-    });
-
-    this.conn.on('data', (data: any) => {
-      if (data && data.type) {
-        this.eventHandlers.forEach((cb) => cb(data as NetworkEvent));
-      }
-    });
-
-    this.conn.on('close', () => {
-      this.onDisconnectedHandlers.forEach((cb) => cb());
-    });
-
-    this.conn.on('error', (err) => {
-      console.error('Connection error:', err);
-    });
-  }
-
-  // Send event to partner
+  // Send real-time game event to partner
   public send(event: NetworkEvent) {
-    if (this.conn && this.conn.open) {
-      this.conn.send(event);
+    if (this.client && this.client.connected && this.roomCode) {
+      const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
+      this.client.publish(topicEvents, JSON.stringify(event), { qos: 1 });
     }
   }
 
@@ -157,17 +213,11 @@ export class MultiplayerService {
   }
 
   public cleanup() {
-    if (this.conn) {
+    if (this.client) {
       try {
-        this.conn.close();
+        this.client.end(true);
       } catch (e) {}
-      this.conn = null;
-    }
-    if (this.peer) {
-      try {
-        this.peer.destroy();
-      } catch (e) {}
-      this.peer = null;
+      this.client = null;
     }
   }
 }

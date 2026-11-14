@@ -19,18 +19,18 @@ export const Lobby: React.FC<LobbyProps> = ({
   const queryParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const invitedRoomCode = queryParams.get('room') || '';
 
-  const [playMode, setPlayMode] = useState<PlayMode>(invitedRoomCode ? 'ONLINE_ROOM' : 'ONLINE_ROOM');
+  const [playMode, setPlayMode] = useState<PlayMode>('ONLINE_ROOM');
   const [onlineTab, setOnlineTab] = useState<'CREATE' | 'JOIN'>(invitedRoomCode ? 'JOIN' : 'CREATE');
 
   // Single player profile (saved in localStorage)
   const [myName, setMyName] = useState(() => {
-    return localStorage.getItem('sq_name') || (invitedRoomCode ? 'Agata' : 'Bima');
+    return localStorage.getItem('sq_name') || (invitedRoomCode ? 'Bims wife' : 'Bima');
   });
   const [myGender, setMyGender] = useState<'BOY' | 'GIRL'>(() => {
     return (localStorage.getItem('sq_gender') as any) || (invitedRoomCode ? 'GIRL' : 'BOY');
   });
   const [myAvatar, setMyAvatar] = useState(() => {
-    return localStorage.getItem('sq_avatar') || (invitedRoomCode ? '🌸' : '🦁');
+    return localStorage.getItem('sq_avatar') || (invitedRoomCode ? '🦊' : '🦁');
   });
 
   // Local 1-Device mode extra inputs
@@ -42,6 +42,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [createdRoomCode, setCreatedRoomCode] = useState('');
   const [waitingForGuest, setWaitingForGuest] = useState(false);
   const [guestConnected, setGuestConnected] = useState<Player | null>(null);
+  const [hostPlayerFound, setHostPlayerFound] = useState<Player | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [joiningLoading, setJoiningLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -59,9 +60,24 @@ export const Lobby: React.FC<LobbyProps> = ({
     setErrorMessage('');
     const code = multiplayer.generateCode();
 
+    const hostPlayer: Player = {
+      id: 'p1',
+      name: myName.trim() || 'Dia (P1)',
+      gender: myGender,
+      avatar: myAvatar,
+      color: '#80DED9',
+      bgColor: 'bg-[#80DED9]',
+      borderColor: 'border-[#1E1B18]',
+      position: 1,
+      stepsTaken: 0,
+      questionsAnswered: 0,
+      laddersClimbed: 0,
+      snakesSlid: 0,
+    };
+
     try {
       setWaitingForGuest(true);
-      await multiplayer.createRoom(code);
+      await multiplayer.createRoom(code, hostPlayer);
       setCreatedRoomCode(code);
 
       // Listen for partner connection
@@ -116,29 +132,25 @@ export const Lobby: React.FC<LobbyProps> = ({
     setJoiningLoading(true);
     setErrorMessage('');
 
+    const guestPlayer: Player = {
+      id: 'p2',
+      name: myName.trim() || 'Dia (P2)',
+      gender: myGender,
+      avatar: myAvatar,
+      color: '#FF758F',
+      bgColor: 'bg-[#FF758F]',
+      borderColor: 'border-[#1E1B18]',
+      position: 1,
+      stepsTaken: 0,
+      questionsAnswered: 0,
+      laddersClimbed: 0,
+      snakesSlid: 0,
+    };
+
     try {
-      await multiplayer.joinRoom(roomCodeInput.trim());
-
-      const guestPlayer: Player = {
-        id: 'p2',
-        name: myName.trim() || 'Dia (P2)',
-        gender: myGender,
-        avatar: myAvatar,
-        color: '#FF758F',
-        bgColor: 'bg-[#FF758F]',
-        borderColor: 'border-[#1E1B18]',
-        position: 1,
-        stepsTaken: 0,
-        questionsAnswered: 0,
-        laddersClimbed: 0,
-        snakesSlid: 0,
-      };
-
-      // Notify host that guest joined
-      multiplayer.send({
-        type: 'GUEST_JOINED',
-        player: guestPlayer,
-      });
+      const host = await multiplayer.joinRoom(roomCodeInput.trim(), guestPlayer);
+      setHostPlayerFound(host);
+      setJoiningLoading(false);
 
       // Listen for host starting the game
       multiplayer.onEvent((event) => {
@@ -147,9 +159,11 @@ export const Lobby: React.FC<LobbyProps> = ({
           onStartOnlineGame(guestPlayer, event.player1, false);
         }
       });
-    } catch (err) {
+    } catch (err: any) {
       setJoiningLoading(false);
-      setErrorMessage('Room tidak ditemukan atau kode salah. Pastikan pasangan sudah membuat room.');
+      setErrorMessage(
+        err.message || 'Room tidak ditemukan atau kode salah. Pastikan pasangan sudah membuat room.'
+      );
     }
   };
 
@@ -308,7 +322,7 @@ export const Lobby: React.FC<LobbyProps> = ({
               type="text"
               value={myName}
               onChange={(e) => setMyName(e.target.value)}
-              placeholder="Misal: Bima"
+              placeholder="Misal: Bima / Bims wife"
               className="w-full px-3 py-2 rounded-xl bg-white border-2 border-[#1E1B18] font-bold text-sm shadow-[2px_2px_0px_#1E1B18] focus:outline-none"
             />
           </div>
@@ -344,7 +358,7 @@ export const Lobby: React.FC<LobbyProps> = ({
       {playMode === 'ONLINE_ROOM' && (
         <div className="space-y-4">
           {/* Subtabs: Buat Room vs Gabung Room */}
-          {!waitingForGuest && !joiningLoading && (
+          {!waitingForGuest && !joiningLoading && !hostPlayerFound && (
             <div className="flex items-center gap-2 mb-2">
               <button
                 type="button"
@@ -403,7 +417,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           {onlineTab === 'CREATE' && waitingForGuest && (
             <div className="p-5 rounded-3xl bg-white border-3 border-[#1E1B18] shadow-[5px_5px_0px_#1E1B18] text-center space-y-4 animate-in fade-in">
               <div className="inline-block px-3 py-1 rounded-full bg-[#80DED9] border-2 border-[#1E1B18] font-archivo text-xs uppercase">
-                Kode Room: <span className="font-mono text-base">{createdRoomCode}</span>
+                Kode Room: <span className="font-mono text-base font-bold">{createdRoomCode}</span>
               </div>
 
               {!guestConnected ? (
@@ -419,9 +433,9 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </p>
                 </div>
               ) : (
-                <div className="p-3 rounded-2xl bg-[#D8F3DC] border-2 border-[#1E1B18] animate-bounce">
-                  <span className="text-2xl">{guestConnected.avatar}</span>
-                  <p className="font-archivo text-sm text-[#2D6A4F] mt-1">
+                <div className="p-4 rounded-2xl bg-[#D8F3DC] border-2 border-[#1E1B18] animate-bounce">
+                  <span className="text-3xl">{guestConnected.avatar}</span>
+                  <p className="font-archivo text-base text-[#2D6A4F] mt-1">
                     {guestConnected.name} Sudah Masuk Room! 🎉
                   </p>
                 </div>
@@ -463,42 +477,58 @@ export const Lobby: React.FC<LobbyProps> = ({
 
           {/* TAB B: JOIN EXISTING ROOM */}
           {onlineTab === 'JOIN' && (
-            <form onSubmit={handleJoinRoom} className="p-5 rounded-3xl bg-[#E0F2FE] border-3 border-[#1E1B18] shadow-[4px_4px_0px_#1E1B18] space-y-3">
-              <h3 className="font-archivo text-base uppercase text-[#1E1B18]">
-                Gabung ke Room Pasangan
-              </h3>
-              <p className="text-xs text-gray-700">
-                Masukkan kode room yang diberikan pasanganmu:
-              </p>
+            <div className="p-5 rounded-3xl bg-[#E0F2FE] border-3 border-[#1E1B18] shadow-[4px_4px_0px_#1E1B18] space-y-3">
+              {hostPlayerFound ? (
+                <div className="text-center py-4 space-y-3">
+                  <div className="p-4 bg-[#D8F3DC] border-2 border-[#1E1B18] rounded-2xl">
+                    <span className="text-3xl">{hostPlayerFound.avatar}</span>
+                    <h4 className="font-archivo text-base text-[#2D6A4F] mt-1">
+                      Berhasil Terhubung dengan {hostPlayerFound.name}! 🎉
+                    </h4>
+                    <p className="text-xs text-gray-700 mt-1">
+                      Menunggu {hostPlayerFound.name} menekan tombol mulai permainan di HP-nya... ⏳
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleJoinRoom} className="space-y-3">
+                  <h3 className="font-archivo text-base uppercase text-[#1E1B18]">
+                    Gabung ke Room Pasangan
+                  </h3>
+                  <p className="text-xs text-gray-700">
+                    Masukkan kode room yang diberikan pasanganmu:
+                  </p>
 
-              <input
-                type="text"
-                value={roomCodeInput}
-                onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
-                placeholder="Contoh: LOVE8"
-                maxLength={6}
-                required
-                className="w-full text-center tracking-widest font-mono text-xl py-2.5 rounded-xl bg-white border-3 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] focus:outline-none uppercase font-bold"
-              />
+                  <input
+                    type="text"
+                    value={roomCodeInput}
+                    onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
+                    placeholder="Contoh: HKCA7"
+                    maxLength={6}
+                    required
+                    className="w-full text-center tracking-widest font-mono text-xl py-2.5 rounded-xl bg-white border-3 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] focus:outline-none uppercase font-bold"
+                  />
 
-              <button
-                type="submit"
-                disabled={joiningLoading}
-                className="w-full py-3 rounded-2xl bg-[#80DED9] font-archivo text-sm uppercase border-3 border-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-2"
-              >
-                {joiningLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Menghubungkan ke Pasangan...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>MASUK KE ROOM PASANGAN</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </form>
+                  <button
+                    type="submit"
+                    disabled={joiningLoading}
+                    className="w-full py-3 rounded-2xl bg-[#80DED9] font-archivo text-sm uppercase border-3 border-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-2"
+                  >
+                    {joiningLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Menghubungkan ke Pasangan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>MASUK KE ROOM PASANGAN</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+            </div>
           )}
         </div>
       )}

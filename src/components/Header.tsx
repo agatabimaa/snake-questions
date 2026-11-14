@@ -1,7 +1,8 @@
 import React from 'react';
 import { Player, GameStatus } from '../types/game';
 import { sound } from '../utils/audio';
-import { Volume2, VolumeX, Music, BookOpen, RotateCcw, Heart } from 'lucide-react';
+import { voiceOver } from '../utils/voiceOver';
+import { Volume2, VolumeX, Music, BookOpen, RotateCcw, Mic, MicOff } from 'lucide-react';
 
 interface HeaderProps {
   player1: Player;
@@ -10,8 +11,10 @@ interface HeaderProps {
   gameStatus: GameStatus;
   soundEnabled: boolean;
   bgmEnabled: boolean;
+  voiceOverEnabled: boolean;
   onToggleSound: () => void;
   onToggleBgm: () => void;
+  onToggleVoiceOver: () => void;
   onOpenHistory: () => void;
   onRestart: () => void;
   historyCount: number;
@@ -24,8 +27,10 @@ export const Header: React.FC<HeaderProps> = ({
   gameStatus,
   soundEnabled,
   bgmEnabled,
+  voiceOverEnabled,
   onToggleSound,
   onToggleBgm,
+  onToggleVoiceOver,
   onOpenHistory,
   onRestart,
   historyCount,
@@ -76,6 +81,17 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
           )}
+
+          {/* Voice-Over (Komentator Suara) Toggle */}
+          <button
+            onClick={onToggleVoiceOver}
+            className={`p-2 rounded-xl border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${
+              voiceOverEnabled ? 'bg-[#FF758F] text-white animate-pulse' : 'bg-gray-200 text-gray-600'
+            }`}
+            title={voiceOverEnabled ? 'Matikan Voice Over Komentator' : 'Nyalakan Voice Over Komentator'}
+          >
+            {voiceOverEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+          </button>
 
           {/* Sound SFX Toggle */}
           <button

@@ -3,6 +3,7 @@ import { Player, GameStatus, TileData, Question, AnsweredLog } from './types/gam
 import { generate49Tiles, getTileCoordinates, TOTAL_TILES } from './utils/board';
 import { QuestionManager } from './utils/questionManager';
 import { sound } from './utils/audio';
+import { voiceOver } from './utils/voiceOver';
 import { multiplayer } from './utils/multiplayer';
 
 import { Header } from './components/Header';
@@ -68,9 +69,10 @@ export const App: React.FC = () => {
   const [logs, setLogs] = useState<AnsweredLog[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
-  // Audio toggles
+  // Audio & Voice toggles
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [bgmEnabled, setBgmEnabled] = useState(false);
+  const [voiceOverEnabled, setVoiceOverEnabled] = useState(true);
 
   const qManagerRef = useRef<QuestionManager>(new QuestionManager('LDR'));
 
@@ -88,6 +90,14 @@ export const App: React.FC = () => {
     setBgmEnabled(active);
   };
 
+  const handleToggleVoiceOver = () => {
+    voiceOver.enabled = !voiceOver.enabled;
+    setVoiceOverEnabled(voiceOver.enabled);
+    if (!voiceOver.enabled) {
+      voiceOver.stop();
+    }
+  };
+
   // Start Local 1-Device Game
   const handleStartLocalGame = (p1: Player, p2: Player) => {
     setPlayer1(p1);
@@ -102,6 +112,7 @@ export const App: React.FC = () => {
 
     qManagerRef.current.setMode('OFFLINE');
     setGameStatus('PLAYING');
+    voiceOver.speak('Permainan dimulai! Selamat bersenang-senang dan saling membuka hati.');
   };
 
   // Start Online Multiplayer Game
@@ -124,6 +135,7 @@ export const App: React.FC = () => {
 
     qManagerRef.current.setMode('LDR');
     setGameStatus('PLAYING');
+    voiceOver.speak('Pasangan berhasil terhubung! Permainan online dimulai.');
   };
 
   // Switch turn
@@ -137,6 +149,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = multiplayer.onEvent((event) => {
       if (event.type === 'DICE_ROLL') {
+        voiceOver.speakDiceRoll(event.value, event.power);
         executeMovement(event.value);
       } else if (event.type === 'QUESTION_OPENED') {
         setCurrentQuestion(event.question);
@@ -169,11 +182,13 @@ export const App: React.FC = () => {
 
   // Local player rolls dice
   const handleLocalRollComplete = (diceValue: number) => {
+    voiceOver.speakDiceRoll(diceValue, 60);
+
     if (isMultiplayer) {
       multiplayer.send({
         type: 'DICE_ROLL',
         value: diceValue,
-        power: 50,
+        power: 60,
       });
     }
     executeMovement(diceValue);
@@ -255,6 +270,7 @@ export const App: React.FC = () => {
     if (tile.type === 'FINISH' || tileId >= TOTAL_TILES) {
       setWinner(activePlayer);
       setGameStatus('VICTORY');
+      voiceOver.speakTileEvent('FINISH');
       return;
     }
 
@@ -262,6 +278,7 @@ export const App: React.FC = () => {
     if (tile.type === 'LADDER' && tile.targetTile) {
       sound.playLadderClimb();
       const target = tile.targetTile;
+      voiceOver.speakTileEvent('LADDER', target);
 
       animatePawnMovement(tileId, target, 850, () => {
         if (currentTurn === 'p1') {
@@ -280,6 +297,7 @@ export const App: React.FC = () => {
     if (tile.type === 'SNAKE' && tile.targetTile) {
       sound.playSnakeSlide();
       const target = tile.targetTile;
+      voiceOver.speakTileEvent('SNAKE', target);
 
       animatePawnMovement(tileId, target, 950, () => {
         if (currentTurn === 'p1') {
@@ -297,6 +315,7 @@ export const App: React.FC = () => {
     // Question tiles
     if (tile.type === 'BOY') {
       sound.playModalPop();
+      voiceOver.speakTileEvent('BOY');
       const q = qManagerRef.current.drawQuestion('BOY');
       openQuestionModal(q);
       return;
@@ -304,6 +323,7 @@ export const App: React.FC = () => {
 
     if (tile.type === 'GIRL') {
       sound.playModalPop();
+      voiceOver.speakTileEvent('GIRL');
       const q = qManagerRef.current.drawQuestion('GIRL');
       openQuestionModal(q);
       return;
@@ -311,6 +331,7 @@ export const App: React.FC = () => {
 
     if (tile.type === 'DEEPTALK') {
       sound.playModalPop();
+      voiceOver.speakTileEvent('DEEPTALK');
       const q = qManagerRef.current.drawQuestion('DEEPTALK');
       openQuestionModal(q);
       return;
@@ -318,6 +339,7 @@ export const App: React.FC = () => {
 
     if (tile.type === 'ACTION') {
       sound.playModalPop();
+      voiceOver.speakTileEvent('ACTION');
       const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
       openDareModal(dare);
       return;
@@ -446,8 +468,10 @@ export const App: React.FC = () => {
         gameStatus={gameStatus}
         soundEnabled={soundEnabled}
         bgmEnabled={bgmEnabled}
+        voiceOverEnabled={voiceOverEnabled}
         onToggleSound={handleToggleSound}
         onToggleBgm={handleToggleBgm}
+        onToggleVoiceOver={handleToggleVoiceOver}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onRestart={handleRestart}
         historyCount={logs.length}

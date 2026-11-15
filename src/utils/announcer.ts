@@ -1,41 +1,86 @@
-// Game Announcer & Voice Over with lively varied intonations (Indonesian Arcade Style)
+// Studio-Quality Human Voice Announcer (Real Recorded Neural Voice Audio Files)
 
 type SubtitleListener = (text: string | null) => void;
 
-class GameAnnouncer {
+interface VoiceClip {
+  id: string;
+  text: string;
+  file: string;
+}
+
+const CLIPS: Record<string, VoiceClip[]> = {
+  TURN: [
+    { id: 'turn_1', text: 'Ayo, giliran kamu!', file: '/audio/voices/turn_1.mp3' },
+    { id: 'turn_2', text: 'Giliran kamu nih, kocok dadunya!', file: '/audio/voices/turn_2.mp3' },
+    { id: 'turn_3', text: 'Yuk giliran kamu melangkah!', file: '/audio/voices/turn_3.mp3' },
+  ],
+  DICE_1: [
+    { id: 'dice_1', text: 'Satu! Pelan-pelan asal pasti.', file: '/audio/voices/dice_1.mp3' },
+    { id: 'dice_1_short', text: 'Satu!', file: '/audio/voices/dice_1_short.mp3' },
+  ],
+  DICE_2: [
+    { id: 'dice_2', text: 'Dua! Melangkah berdua!', file: '/audio/voices/dice_2.mp3' },
+    { id: 'dice_2_short', text: 'Dua!', file: '/audio/voices/dice_2_short.mp3' },
+  ],
+  DICE_3: [
+    { id: 'dice_3', text: 'Tiga! Asyik meluncur!', file: '/audio/voices/dice_3.mp3' },
+    { id: 'dice_3_short', text: 'Tiga!', file: '/audio/voices/dice_3_short.mp3' },
+  ],
+  DICE_4: [
+    { id: 'dice_4', text: 'Empat! Makin dekat nih!', file: '/audio/voices/dice_4.mp3' },
+    { id: 'dice_4_short', text: 'Empat!', file: '/audio/voices/dice_4_short.mp3' },
+  ],
+  DICE_5: [
+    { id: 'dice_5', text: 'Lima! Dikit lagi sampai!', file: '/audio/voices/dice_5.mp3' },
+    { id: 'dice_5_short', text: 'Lima!', file: '/audio/voices/dice_5_short.mp3' },
+  ],
+  DICE_6: [
+    { id: 'dice_6', text: 'Enam! Hoki banget! Yeay!', file: '/audio/voices/dice_6.mp3' },
+    { id: 'dice_6_short', text: 'Enam! Mantap jiwa!', file: '/audio/voices/dice_6_short.mp3' },
+  ],
+  LADDER: [
+    { id: 'ladder_1', text: 'Wah, naik tangga nih! Asyik banget!', file: '/audio/voices/ladder_1.mp3' },
+    { id: 'ladder_2', text: 'Mantap, melesat naik ke atas!', file: '/audio/voices/ladder_2.mp3' },
+    { id: 'ladder_3', text: 'Rezeki anak baik, naik tangga cinta!', file: '/audio/voices/ladder_3.mp3' },
+  ],
+  SNAKE: [
+    { id: 'snake_1', text: 'Kasian, prosotan pakai ular deh! Hehehe.', file: '/audio/voices/snake_1.mp3' },
+    { id: 'snake_2', text: 'Yaaah, digigit ular manja, turun deh!', file: '/audio/voices/snake_2.mp3' },
+    { id: 'snake_3', text: 'Aduh kena ular, sabar ya sayang!', file: '/audio/voices/snake_3.mp3' },
+  ],
+  QUESTION: [
+    { id: 'question_1', text: 'Saatnya deep talk berdua!', file: '/audio/voices/question_1.mp3' },
+    { id: 'question_2', text: 'Wah, ada pertanyaan seru nih!', file: '/audio/voices/question_2.mp3' },
+  ],
+  DARE: [
+    { id: 'dare_1', text: 'Cieee, ada aksi manis nih! Lakukan ya!', file: '/audio/voices/dare_1.mp3' },
+  ],
+  VICTORY: [
+    { id: 'victory_1', text: 'Horeee! Selamat kamu menang! Cinta kalian berdua luar biasa!', file: '/audio/voices/victory_1.mp3' },
+  ],
+};
+
+class HumanAnnouncer {
   public enabled: boolean = true;
-  private currentVoice: SpeechSynthesisVoice | null = null;
+  private currentAudio: HTMLAudioElement | null = null;
   private listeners: SubtitleListener[] = [];
   private subtitleTimer: any = null;
+  private audioCache: Map<string, HTMLAudioElement> = new Map();
 
   constructor() {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      this.initVoice();
-      if (window.speechSynthesis.onvoiceschanged !== undefined) {
-        window.speechSynthesis.onvoiceschanged = () => this.initVoice();
-      }
+    // Preload common audio files in browser
+    if (typeof window !== 'undefined') {
+      try {
+        Object.values(CLIPS).forEach((group) => {
+          group.forEach((clip) => {
+            const audio = new Audio();
+            audio.src = clip.file;
+            audio.preload = 'auto';
+            this.audioCache.set(clip.file, audio);
+          });
+        });
+      } catch (e) {}
     }
-  }
-
-  private initVoice() {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    const voices = window.speechSynthesis.getVoices();
-
-    // Prioritize natural Indonesian voices
-    // Examples: Google Bahasa Indonesia, Microsoft Gadis Online (Natural), Microsoft Ardi, Apple Damayanti
-    const bestIndonesian = voices.find((v) => {
-      const name = v.name.toLowerCase();
-      const lang = v.lang.toLowerCase();
-      return (
-        (lang.includes('id-id') || lang.includes('id_id') || lang === 'id') &&
-        (name.includes('natural') || name.includes('google') || name.includes('gadis') || name.includes('ardi'))
-      );
-    }) || voices.find((v) => {
-      const lang = v.lang.toLowerCase();
-      return lang.includes('id-id') || lang.includes('id_id') || lang === 'id' || v.name.toLowerCase().includes('indonesia');
-    });
-
-    this.currentVoice = bestIndonesian || null;
   }
 
   public subscribeSubtitle(fn: SubtitleListener) {
@@ -53,194 +98,111 @@ class GameAnnouncer {
     }, 3200);
   }
 
-  // Core speak method with varied intonation and micro-jitter for organic speech
-  public speak(
-    text: string,
-    options?: {
-      pitch?: number;
-      rate?: number;
-      volume?: number;
-      onEnd?: () => void;
-      skipSubtitle?: boolean;
-    }
-  ) {
-    if (!options?.skipSubtitle) {
-      this.showSubtitle(text);
-    }
+  // Play natural human voice audio clip
+  private playClip(clip: VoiceClip, options?: { onEnd?: () => void }) {
+    this.showSubtitle(clip.text);
 
-    if (!this.enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    if (!this.enabled || typeof window === 'undefined') {
       if (options?.onEnd) options.onEnd();
       return;
     }
 
     try {
-      window.speechSynthesis.cancel();
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      if (this.currentVoice) {
-        utterance.voice = this.currentVoice;
-      }
-      utterance.lang = 'id-ID';
-
-      // Varied intonation with micro-jitter
-      const basePitch = options?.pitch ?? 1.1;
-      const baseRate = options?.rate ?? 1.05;
-      const pitchJitter = (Math.random() * 0.08 - 0.04);
-      const rateJitter = (Math.random() * 0.06 - 0.03);
-
-      utterance.pitch = Math.max(0.5, Math.min(2.0, basePitch + pitchJitter));
-      utterance.rate = Math.max(0.5, Math.min(1.8, baseRate + rateJitter));
-      utterance.volume = options?.volume ?? 1.0;
-
-      if (options?.onEnd) {
-        utterance.onend = options.onEnd;
-        utterance.onerror = options.onEnd;
+      // Stop ongoing voice
+      if (this.currentAudio) {
+        this.currentAudio.pause();
+        this.currentAudio.currentTime = 0;
       }
 
-      window.speechSynthesis.speak(utterance);
+      let audio = this.audioCache.get(clip.file);
+      if (!audio) {
+        audio = new Audio(clip.file);
+        this.audioCache.set(clip.file, audio);
+      }
+
+      this.currentAudio = audio;
+      audio.currentTime = 0;
+      audio.volume = 1.0;
+
+      audio.onended = () => {
+        if (options?.onEnd) options.onEnd();
+      };
+
+      audio.onerror = () => {
+        if (options?.onEnd) options.onEnd();
+      };
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((e) => {
+          // Auto-play policy or file error
+          if (options?.onEnd) options.onEnd();
+        });
+      }
     } catch (e) {
-      console.warn('Announcer speech synthesis error:', e);
       if (options?.onEnd) options.onEnd();
     }
   }
 
   public stop() {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    if (this.currentAudio) {
       try {
-        window.speechSynthesis.cancel();
+        this.currentAudio.pause();
+        this.currentAudio.currentTime = 0;
       } catch (e) {}
     }
     this.listeners.forEach((fn) => fn(null));
   }
 
-  // 1. ANNOUNCE TURN: "Ayo giliran kamu!", "Giliran kamu nih!"
-  public announceTurn(playerName?: string) {
-    const lines = [
-      'Ayo, giliran kamu!',
-      'Giliran kamu nih, kocok dadunya!',
-      'Yuk giliran kamu melangkah!',
-      playerName ? `Saatnya giliran ${playerName}!` : 'Giliran kamu nih, buktikan hokimu!',
-      playerName ? `Ayo ${playerName}, lempar dadunya!` : 'Ayo lempar dadunya!',
-    ];
-    const picked = lines[Math.floor(Math.random() * lines.length)];
-    this.speak(picked, { pitch: 1.18, rate: 1.08 });
+  // 1. ANNOUNCE TURN: "Ayo giliran kamu!"
+  public announceTurn(_playerName?: string) {
+    const list = CLIPS.TURN;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 
-  // 2. ANNOUNCE DICE NUMBER: 1 to 6 with expressive commentary
+  // 2. ANNOUNCE DICE: "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam"
   public announceDice(val: number) {
-    const diceReactions: Record<number, string[]> = {
-      1: [
-        'Satu! Pelan-pelan asal pasti!',
-        'Satu! Santai dulu yaa.',
-        'Satu! Yang penting maju bersama.',
-        'Dapat satu! Tetap semangat!',
-      ],
-      2: [
-        'Dua! Melangkah berdua!',
-        'Dua! Asyik, jalan berdua!',
-        'Dua! Mantap melangkah!',
-        'Dapat dua!',
-      ],
-      3: [
-        'Tiga! Asyik meluncur!',
-        'Tiga! Melangkah mantap!',
-        'Tiga! Terus maju!',
-        'Dapat tiga! Keren!',
-      ],
-      4: [
-        'Empat! Makin dekat nih!',
-        'Empat! Keren banget!',
-        'Empat! Melangkah pasti!',
-        'Dapat empat!',
-      ],
-      5: [
-        'Lima! Dikit lagi sampai!',
-        'Lima! Cepat banget melesat!',
-        'Lima! Mantap jiwa!',
-        'Dapat lima! Hoki nih!',
-      ],
-      6: [
-        'Enam! Hoki banget! Yeay!',
-        'Enam! Mantap jiwa!',
-        'Wah, enam! Rezeki anak baik!',
-        'Enam! Hoki maksimal!',
-        'Dapat enam! Keren abis!',
-      ],
-    };
-
-    const choices = diceReactions[val] || [`Dadu ${val}!`];
-    const picked = choices[Math.floor(Math.random() * choices.length)];
-
-    // Higher pitch and energy for higher rolls!
-    const pitch = 1.0 + (val - 1) * 0.05;
-    const rate = 1.02 + (val - 1) * 0.02;
-
-    this.speak(picked, { pitch, rate });
+    const key = `DICE_${val}`;
+    const list = CLIPS[key] || CLIPS.DICE_1;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 
   // 3. ANNOUNCE LADDER: "Wah, naik tangga nih!"
   public announceLadder(_playerName?: string) {
-    const lines = [
-      'Wah, naik tangga nih! Asyik banget!',
-      'Mantap! Melesat naik ke atas!',
-      'Rezeki anak baik, naik tangga cinta!',
-      'Yeay! Jalan tol ke atas, keren!',
-      'Wah, naik tangga! Terbang tinggi!',
-      'Asyik naik tangga, makin dekat finish!',
-    ];
-    const picked = lines[Math.floor(Math.random() * lines.length)];
-    this.speak(picked, { pitch: 1.28, rate: 1.12 });
+    const list = CLIPS.LADDER;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 
-  // 4. ANNOUNCE SNAKE: "Kasian, prosotan pakai ular!"
+  // 4. ANNOUNCE SNAKE: "Kasian, prosotan pakai ular deh!"
   public announceSnake(_playerName?: string) {
-    const lines = [
-      'Kasian... prosotan pakai ular deh! Hehehe.',
-      'Yaaah... digigit ular manja, turun dulu yaa!',
-      'Aduh, kepeleset ular! Sabar ya sayang!',
-      'Oopps! Meluncur ke bawah dulu, jangan sedih ya!',
-      'Waduh kena ular! Kasian prosotan!',
-      'Kasian prosotan pakai ular! Nanti naik lagi yaa!',
-    ];
-    const picked = lines[Math.floor(Math.random() * lines.length)];
-    // Playful, cute, empathetic cadence
-    this.speak(picked, { pitch: 0.98, rate: 1.0 });
+    const list = CLIPS.SNAKE;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 
-  // 5. ANNOUNCE QUESTION CARD
+  // 5. ANNOUNCE QUESTION: "Saatnya deep talk berdua!"
   public announceQuestion() {
-    const lines = [
-      'Saatnya deep talk berdua!',
-      'Wah, ada pertanyaan seru nih!',
-      'Jawab jujur dari hati yaa!',
-      'Pertanyaan cinta, dengarkan baik-baik!',
-      'Waktunya saling membuka hati!',
-    ];
-    const picked = lines[Math.floor(Math.random() * lines.length)];
-    this.speak(picked, { pitch: 1.12, rate: 1.04 });
+    const list = CLIPS.QUESTION;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 
-  // 6. ANNOUNCE DARE CARD
+  // 6. ANNOUNCE DARE: "Cieee, ada aksi manis nih!"
   public announceDare() {
-    const lines = [
-      'Cieee, ada aksi manis nih!',
-      'Tantangan cinta! Wajib dilakukan yaa!',
-      'Saatnya buktikan cintamu!',
-      'Aksi manis khusus buat kamu!',
-    ];
-    const picked = lines[Math.floor(Math.random() * lines.length)];
-    this.speak(picked, { pitch: 1.2, rate: 1.08 });
+    const list = CLIPS.DARE;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 
   // 7. ANNOUNCE VICTORY
-  public announceVictory(winnerName: string) {
-    const lines = [
-      `Horeee! Selamat ${winnerName} jadi pemenangnya! Cinta kalian luar biasa!`,
-      `Yeaaay! Finish tercapai! Kalian berdua pasangan paling serasi!`,
-    ];
-    const picked = lines[Math.floor(Math.random() * lines.length)];
-    this.speak(picked, { pitch: 1.25, rate: 1.06 });
+  public announceVictory(_winnerName?: string) {
+    const list = CLIPS.VICTORY;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
   }
 }
 
-export const announcer = new GameAnnouncer();
+export const announcer = new HumanAnnouncer();

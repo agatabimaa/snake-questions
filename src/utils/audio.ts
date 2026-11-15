@@ -2,8 +2,26 @@
 class SoundSystem {
   private ctx: AudioContext | null = null;
   public enabled: boolean = true;
-  public bgmEnabled: boolean = false;
+  public bgmEnabled: boolean = true; // Default ON as requested
   private bgmInterval: any = null;
+
+  constructor() {
+    // Automatically start relaxing music on the very first user touch or click
+    if (typeof window !== 'undefined') {
+      const autoStartBgm = () => {
+        if (this.bgmEnabled && !this.bgmInterval) {
+          this.init();
+          this.startGentleChords();
+        }
+        window.removeEventListener('click', autoStartBgm);
+        window.removeEventListener('touchstart', autoStartBgm);
+        window.removeEventListener('pointerdown', autoStartBgm);
+      };
+      window.addEventListener('click', autoStartBgm, { passive: true });
+      window.addEventListener('touchstart', autoStartBgm, { passive: true });
+      window.addEventListener('pointerdown', autoStartBgm, { passive: true });
+    }
+  }
 
   private init() {
     if (!this.ctx && typeof window !== 'undefined') {
@@ -310,13 +328,22 @@ class SoundSystem {
     return this.bgmEnabled;
   }
 
+  public startBGM() {
+    this.bgmEnabled = true;
+    this.init();
+    if (!this.bgmInterval) {
+      this.startGentleChords();
+    }
+  }
+
   private startGentleChords() {
     if (this.bgmInterval) clearInterval(this.bgmInterval);
+    // Soothing Lofi / Acoustic chords for couples (Cmaj7, Am9, Fmaj7, G7sus4)
     const chords = [
-      [261.63, 329.63, 392.0], // C
-      [220.0, 261.63, 329.63], // Am
-      [174.61, 220.0, 261.63], // F
-      [196.0, 246.94, 293.66], // G
+      [130.81, 261.63, 329.63, 392.0, 493.88], // Cmaj7 (C3, C4, E4, G4, B4)
+      [110.0, 220.0, 261.63, 329.63, 493.88],  // Am9 (A2, A3, C4, E4, B4)
+      [87.31, 174.61, 220.0, 261.63, 329.63],   // Fmaj7 (F2, F3, A3, C4, E4)
+      [98.0, 196.0, 261.63, 293.66, 392.0],     // Gsus4/G (G2, G3, C4, D4, G4)
     ];
     let chordIdx = 0;
 
@@ -327,27 +354,29 @@ class SoundSystem {
         chordIdx++;
         const now = this.ctx.currentTime;
 
-        chord.forEach((freq) => {
+        chord.forEach((freq, idx) => {
           const osc = this.ctx!.createOscillator();
           const gain = this.ctx!.createGain();
 
           osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, now);
+          osc.frequency.setValueAtTime(freq, now + idx * 0.04);
 
-          gain.gain.setValueAtTime(0.02, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 2.8);
+          // Soft attack and long gentle resonance
+          gain.gain.setValueAtTime(0.001, now + idx * 0.04);
+          gain.gain.linearRampToValueAtTime(0.025, now + idx * 0.04 + 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.0005, now + idx * 0.04 + 3.4);
 
           osc.connect(gain);
           gain.connect(this.ctx!.destination);
 
-          osc.start(now);
-          osc.stop(now + 2.9);
+          osc.start(now + idx * 0.04);
+          osc.stop(now + idx * 0.04 + 3.5);
         });
       } catch (e) {}
     };
 
     playChord();
-    this.bgmInterval = setInterval(playChord, 3000);
+    this.bgmInterval = setInterval(playChord, 3600);
   }
 
   private stopGentleChords() {

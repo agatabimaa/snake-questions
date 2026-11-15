@@ -70,10 +70,10 @@ export const App: React.FC = () => {
   const [logs, setLogs] = useState<AnsweredLog[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
-  // Audio toggles
+  // Audio toggles (BGM Musik Santai default ON as requested)
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [bgmEnabled, setBgmEnabled] = useState(false);
+  const [bgmEnabled, setBgmEnabled] = useState(true);
   const [announcerSubtitle, setAnnouncerSubtitle] = useState<string | null>(null);
 
   // Subscribe to announcer subtitles
@@ -254,6 +254,7 @@ export const App: React.FC = () => {
 
     qManagerRef.current.setMode('OFFLINE');
     setGameStatus('PLAYING');
+    sound.startBGM();
     persistState('PLAYING', p1, p2, 'p1', []);
     setTimeout(() => announcer.announceTurn(p1.name), 600);
   };
@@ -296,6 +297,7 @@ export const App: React.FC = () => {
 
     qManagerRef.current.setMode('LDR');
     setGameStatus('PLAYING');
+    sound.startBGM();
 
     persistState('PLAYING', p1, p2, 'p1', []);
     setTimeout(() => announcer.announceTurn(p1.name), 600);
@@ -311,6 +313,7 @@ export const App: React.FC = () => {
         setIsMultiplayer(session.isMultiplayer);
         setMyRole(session.myRole);
         setGameStatus(state.status === 'MOVING' ? 'PLAYING' : state.status);
+        sound.startBGM();
         setPlayer1(state.player1);
         setPlayer2(state.player2);
         setCurrentTurn(state.currentTurn);

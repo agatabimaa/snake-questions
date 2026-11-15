@@ -181,6 +181,7 @@ export const Lobby: React.FC<LobbyProps> = ({
       snakesSlid: 0,
     };
 
+    multiplayer.stopHeartbeat();
     multiplayer.send({
       type: 'START_GAME',
       player1: hostPlayer,

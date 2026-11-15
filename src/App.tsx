@@ -352,9 +352,17 @@ export const App: React.FC = () => {
         setCurrentQuestion(event.question);
         setGameStatus('QUESTION');
         persistState('QUESTION', undefined, undefined, undefined, undefined, event.question);
+        if (event.question.category === 'GIRL') {
+          announcer.announceGirlQuestion();
+        } else if (event.question.category === 'BOY') {
+          announcer.announceBoyQuestion();
+        } else if (event.question.category === 'DEEPTALK') {
+          announcer.announceDeeptalkQuestion();
+        }
       } else if (event.type === 'DARE_OPENED') {
         setCurrentDare(event.dare);
         setGameStatus('ACTION_DARE');
+        announcer.announceDare();
         persistState('ACTION_DARE', undefined, undefined, undefined, undefined, null, event.dare);
       } else if (event.type === 'QUESTION_REROLLED') {
         setCurrentQuestion(event.question);
@@ -540,7 +548,7 @@ export const App: React.FC = () => {
     if (tile.type === 'BOY') {
       setTimeout(() => {
         sound.playModalPop();
-        announcer.announceQuestion();
+        announcer.announceBoyQuestion();
         const q = qManagerRef.current.drawQuestion('BOY');
         openQuestionModal(q);
       }, 350);
@@ -550,7 +558,7 @@ export const App: React.FC = () => {
     if (tile.type === 'GIRL') {
       setTimeout(() => {
         sound.playModalPop();
-        announcer.announceQuestion();
+        announcer.announceGirlQuestion();
         const q = qManagerRef.current.drawQuestion('GIRL');
         openQuestionModal(q);
       }, 350);
@@ -560,7 +568,7 @@ export const App: React.FC = () => {
     if (tile.type === 'DEEPTALK') {
       setTimeout(() => {
         sound.playModalPop();
-        announcer.announceQuestion();
+        announcer.announceDeeptalkQuestion();
         const q = qManagerRef.current.drawQuestion('DEEPTALK');
         openQuestionModal(q);
       }, 350);

@@ -48,6 +48,19 @@ const CLIPS: Record<string, VoiceClip[]> = {
     { id: 'snake_2', text: 'Yaaah, digigit ular manja, turun deh!', file: '/audio/voices/snake_2.mp3' },
     { id: 'snake_3', text: 'Aduh kena ular, sabar ya sayang!', file: '/audio/voices/snake_3.mp3' },
   ],
+  QUESTION_GIRL: [
+    { id: 'girl_1', text: 'Pertanyaan khusus buat si cewek nih! Jawab jujur ya!', file: '/audio/voices/girl_1.mp3' },
+    { id: 'girl_2', text: 'Yuk, si cewek yang cerita! Didengerin baik-baik ya!', file: '/audio/voices/girl_2.mp3' },
+  ],
+  QUESTION_BOY: [
+    { id: 'boy_1', text: 'Nah, pertanyaan khusus buat si cowok nih! Jangan ngeles ya!', file: '/audio/voices/boy_1.mp3' },
+    { id: 'boy_2', text: 'Giliran si cowok yang buka suara! Cerita yang jujur ya!', file: '/audio/voices/boy_2.mp3' },
+  ],
+  QUESTION_DEEPTALK: [
+    { id: 'question_1', text: 'Saatnya deep talk berdua!', file: '/audio/voices/question_1.mp3' },
+    { id: 'question_2', text: 'Wah, ada pertanyaan seru nih!', file: '/audio/voices/question_2.mp3' },
+    { id: 'deeptalk_2', text: 'Yuk, ngobrol dari hati ke hati berdua!', file: '/audio/voices/deeptalk_2.mp3' },
+  ],
   QUESTION: [
     { id: 'question_1', text: 'Saatnya deep talk berdua!', file: '/audio/voices/question_1.mp3' },
     { id: 'question_2', text: 'Wah, ada pertanyaan seru nih!', file: '/audio/voices/question_2.mp3' },
@@ -183,11 +196,30 @@ class HumanAnnouncer {
     this.playClip(picked);
   }
 
-  // 5. ANNOUNCE QUESTION: "Saatnya deep talk berdua!"
-  public announceQuestion() {
-    const list = CLIPS.QUESTION;
+  // 5a. ANNOUNCE GIRL QUESTION
+  public announceGirlQuestion() {
+    const list = CLIPS.QUESTION_GIRL;
     const picked = list[Math.floor(Math.random() * list.length)];
     this.playClip(picked);
+  }
+
+  // 5b. ANNOUNCE BOY QUESTION
+  public announceBoyQuestion() {
+    const list = CLIPS.QUESTION_BOY;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
+  }
+
+  // 5c. ANNOUNCE DEEPTALK QUESTION
+  public announceDeeptalkQuestion() {
+    const list = CLIPS.QUESTION_DEEPTALK;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    this.playClip(picked);
+  }
+
+  // Generic fallback
+  public announceQuestion() {
+    this.announceDeeptalkQuestion();
   }
 
   // 6. ANNOUNCE DARE: "Cieee, ada aksi manis nih!"

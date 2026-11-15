@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Player } from '../types/game';
 import { sound } from '../utils/audio';
+import { announcer } from '../utils/announcer';
 import { Dices, Eye, Sparkles, Hourglass, Copy, Check } from 'lucide-react';
 
 interface DiceRollerProps {
@@ -147,6 +148,7 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
         setCubeRotation({ x: finalRot.x, y: finalRot.y, z: 0 });
         setDiceResult(finalVal);
         sound.playDiceLand(finalVal);
+        announcer.announceDice(finalVal);
 
         // Feedback toast
         let comment = '';

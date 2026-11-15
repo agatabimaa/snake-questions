@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Player, GameStatus } from '../types/game';
 import { sound } from '../utils/audio';
-import { Volume2, VolumeX, Music, BookOpen, RotateCcw, Copy, Check, LogOut } from 'lucide-react';
+import { Volume2, VolumeX, Music, BookOpen, RotateCcw, Copy, Check, LogOut, Mic, MicOff } from 'lucide-react';
 
 interface HeaderProps {
   player1: Player;
@@ -9,9 +9,11 @@ interface HeaderProps {
   currentTurn: 'p1' | 'p2';
   gameStatus: GameStatus;
   soundEnabled: boolean;
+  voiceEnabled: boolean;
   bgmEnabled: boolean;
   roomCode?: string;
   onToggleSound: () => void;
+  onToggleVoice: () => void;
   onToggleBgm: () => void;
   onOpenHistory: () => void;
   onRestart: () => void;
@@ -24,9 +26,11 @@ export const Header: React.FC<HeaderProps> = ({
   currentTurn,
   gameStatus,
   soundEnabled,
+  voiceEnabled,
   bgmEnabled,
   roomCode,
   onToggleSound,
+  onToggleVoice,
   onToggleBgm,
   onOpenHistory,
   onRestart,
@@ -109,12 +113,27 @@ export const Header: React.FC<HeaderProps> = ({
             className={`p-2 rounded-xl border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${
               soundEnabled ? 'bg-[#80DED9]' : 'bg-gray-200'
             }`}
-            title={soundEnabled ? 'Matikan Suara SFX' : 'Nyalakan Suara SFX'}
+            title={soundEnabled ? 'Matikan Efek Suara (SFX)' : 'Nyalakan Efek Suara (SFX)'}
           >
             {soundEnabled ? (
               <Volume2 className="w-4 h-4 text-[#1E1B18]" />
             ) : (
               <VolumeX className="w-4 h-4 text-gray-600" />
+            )}
+          </button>
+
+          {/* Voice Announcer Toggle */}
+          <button
+            onClick={onToggleVoice}
+            className={`p-2 rounded-xl border-2 border-[#1E1B18] shadow-[2px_2px_0px_#1E1B18] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${
+              voiceEnabled ? 'bg-[#FF758F] text-white' : 'bg-gray-200 text-gray-600'
+            }`}
+            title={voiceEnabled ? 'Matikan Suara Komentator Game' : 'Nyalakan Suara Komentator Game'}
+          >
+            {voiceEnabled ? (
+              <Mic className="w-4 h-4 text-[#1E1B18]" />
+            ) : (
+              <MicOff className="w-4 h-4 text-gray-600" />
             )}
           </button>
 

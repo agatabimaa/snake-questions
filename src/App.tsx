@@ -3,6 +3,7 @@ import { Player, GameStatus, TileData, Question, AnsweredLog, SyncedGameState, S
 import { generate49Tiles, getTileCoordinates, TOTAL_TILES } from './utils/board';
 import { QuestionManager } from './utils/questionManager';
 import { sound } from './utils/audio';
+import { announcer } from './utils/announcer';
 import { multiplayer } from './utils/multiplayer';
 
 import { Header } from './components/Header';
@@ -71,7 +72,16 @@ export const App: React.FC = () => {
 
   // Audio toggles
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [bgmEnabled, setBgmEnabled] = useState(false);
+  const [announcerSubtitle, setAnnouncerSubtitle] = useState<string | null>(null);
+
+  // Subscribe to announcer subtitles
+  useEffect(() => {
+    return announcer.subscribeSubtitle((text) => {
+      setAnnouncerSubtitle(text);
+    });
+  }, []);
 
   const qManagerRef = useRef<QuestionManager>(new QuestionManager('LDR'));
 
@@ -214,6 +224,11 @@ export const App: React.FC = () => {
     setBgmEnabled(active);
   };
 
+  const handleToggleVoice = () => {
+    announcer.enabled = !announcer.enabled;
+    setVoiceEnabled(announcer.enabled);
+  };
+
   // Start Local 1-Device Game
   const handleStartLocalGame = (p1: Player, p2: Player) => {
     setPlayer1(p1);
@@ -240,6 +255,7 @@ export const App: React.FC = () => {
     qManagerRef.current.setMode('OFFLINE');
     setGameStatus('PLAYING');
     persistState('PLAYING', p1, p2, 'p1', []);
+    setTimeout(() => announcer.announceTurn(p1.name), 600);
   };
 
   // Start Online Multiplayer Game
@@ -282,6 +298,7 @@ export const App: React.FC = () => {
     setGameStatus('PLAYING');
 
     persistState('PLAYING', p1, p2, 'p1', []);
+    setTimeout(() => announcer.announceTurn(p1.name), 600);
   };
 
   // Resume session from Lobby card
@@ -326,6 +343,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     const unsubscribeEvents = multiplayer.onEvent((event) => {
       if (event.type === 'DICE_ROLL') {
+        announcer.announceDice(event.value);
         executeMovement(event.value);
       } else if (event.type === 'QUESTION_OPENED') {
         setCurrentQuestion(event.question);
@@ -348,6 +366,9 @@ export const App: React.FC = () => {
         setCurrentTurn(event.nextTurn);
         setTurnCount((prev) => prev + 1);
         setGameStatus('PLAYING');
+        setTimeout(() => {
+          announcer.announceTurn(event.nextTurn === 'p1' ? player1.name : player2.name);
+        }, 450);
       } else if (event.type === 'RESTART_GAME') {
         clearAllSessionData();
         setGameStatus('LOBBY');
@@ -460,6 +481,8 @@ export const App: React.FC = () => {
 
     // Finish
     if (tile.type === 'FINISH' || tileId >= TOTAL_TILES) {
+      sound.playVictory();
+      announcer.announceVictory(activePlayer.name);
       setWinner(activePlayer);
       setGameStatus('VICTORY');
       persistState('VICTORY');
@@ -469,6 +492,7 @@ export const App: React.FC = () => {
     // Ladder
     if (tile.type === 'LADDER' && tile.targetTile) {
       sound.playLadderClimb();
+      announcer.announceLadder(activePlayer.name);
       const target = tile.targetTile;
 
       animatePawnMovement(tileId, target, 1100, () => {
@@ -490,6 +514,7 @@ export const App: React.FC = () => {
     // Snake
     if (tile.type === 'SNAKE' && tile.targetTile) {
       sound.playSnakeSlide();
+      announcer.announceSnake(activePlayer.name);
       const target = tile.targetTile;
 
       animatePawnMovement(tileId, target, 1200, () => {
@@ -512,6 +537,7 @@ export const App: React.FC = () => {
     if (tile.type === 'BOY') {
       setTimeout(() => {
         sound.playModalPop();
+        announcer.announceQuestion();
         const q = qManagerRef.current.drawQuestion('BOY');
         openQuestionModal(q);
       }, 350);
@@ -521,6 +547,7 @@ export const App: React.FC = () => {
     if (tile.type === 'GIRL') {
       setTimeout(() => {
         sound.playModalPop();
+        announcer.announceQuestion();
         const q = qManagerRef.current.drawQuestion('GIRL');
         openQuestionModal(q);
       }, 350);
@@ -530,6 +557,7 @@ export const App: React.FC = () => {
     if (tile.type === 'DEEPTALK') {
       setTimeout(() => {
         sound.playModalPop();
+        announcer.announceQuestion();
         const q = qManagerRef.current.drawQuestion('DEEPTALK');
         openQuestionModal(q);
       }, 350);
@@ -539,6 +567,7 @@ export const App: React.FC = () => {
     if (tile.type === 'ACTION') {
       setTimeout(() => {
         sound.playModalPop();
+        announcer.announceDare();
         const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
         openDareModal(dare);
       }, 350);
@@ -664,6 +693,9 @@ export const App: React.FC = () => {
     setTurnCount((prev) => prev + 1);
     setGameStatus('PLAYING');
     persistState('PLAYING', undefined, undefined, nextTurn, updatedLogs, null, null);
+    setTimeout(() => {
+      announcer.announceTurn(nextTurn === 'p1' ? player1.name : player2.name);
+    }, 450);
   };
 
   const clearAllSessionData = () => {
@@ -689,9 +721,11 @@ export const App: React.FC = () => {
         currentTurn={currentTurn}
         gameStatus={gameStatus}
         soundEnabled={soundEnabled}
+        voiceEnabled={voiceEnabled}
         bgmEnabled={bgmEnabled}
         roomCode={activeRoomCode}
         onToggleSound={handleToggleSound}
+        onToggleVoice={handleToggleVoice}
         onToggleBgm={handleToggleBgm}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onRestart={handleRestart}
@@ -779,6 +813,18 @@ export const App: React.FC = () => {
           onRestart={handleRestart}
           onViewHistory={() => setIsHistoryOpen(true)}
         />
+      )}
+
+      {/* Floating Animated Game Announcer Subtitle Bubble */}
+      {announcerSubtitle && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] px-4 py-2.5 rounded-2xl bg-[#FFD23F] border-3 border-[#1E1B18] shadow-[5px_5px_0px_#1E1B18] animate-in slide-in-from-bottom-3 fade-in flex items-center gap-3 pointer-events-none">
+          <div className="w-8 h-8 rounded-xl bg-white border-2 border-[#1E1B18] flex items-center justify-center text-base shadow-[1.5px_1.5px_0px_#1E1B18] shrink-0 animate-bounce">
+            🎙️
+          </div>
+          <p className="font-archivo text-xs sm:text-sm text-[#1E1B18] uppercase tracking-wide leading-tight font-black">
+            "{announcerSubtitle}"
+          </p>
+        </div>
       )}
     </div>
   );

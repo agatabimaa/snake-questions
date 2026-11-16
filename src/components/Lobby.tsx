@@ -23,15 +23,19 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [playMode, setPlayMode] = useState<PlayMode>('ONLINE_ROOM');
   const [onlineTab, setOnlineTab] = useState<'CREATE' | 'JOIN'>(invitedRoomCode ? 'JOIN' : 'CREATE');
 
-  // Single player profile (saved in localStorage)
+  // Single player profile (saved in localStorage, completely empty by default)
   const [myName, setMyName] = useState(() => {
-    return localStorage.getItem('sq_name') || (invitedRoomCode ? 'Bims wife' : 'Bima');
+    const saved = localStorage.getItem('sq_name');
+    if (saved && saved !== 'Bima' && saved !== 'Bims wife' && saved !== 'Agata') {
+      return saved;
+    }
+    return '';
   });
   const [myGender, setMyGender] = useState<'BOY' | 'GIRL'>(() => {
     return (localStorage.getItem('sq_gender') as any) || (invitedRoomCode ? 'GIRL' : 'BOY');
   });
   const [myAvatar, setMyAvatar] = useState(() => {
-    return localStorage.getItem('sq_avatar') || (invitedRoomCode ? '🦊' : '🦁');
+    return localStorage.getItem('sq_avatar') || (invitedRoomCode ? '🌸' : '🦁');
   });
 
   // Check saved session in localStorage
@@ -71,8 +75,14 @@ export const Lobby: React.FC<LobbyProps> = ({
     return [];
   });
 
-  // Local 1-Device mode extra inputs
-  const [p2LocalName, setP2LocalName] = useState('Agata');
+  // Local 1-Device mode extra inputs (empty by default)
+  const [p2LocalName, setP2LocalName] = useState(() => {
+    const saved = localStorage.getItem('sq_p2_local_name');
+    if (saved && saved !== 'Agata' && saved !== 'Bima' && saved !== 'Bims wife') {
+      return saved;
+    }
+    return '';
+  });
   const [p2LocalAvatar, setP2LocalAvatar] = useState('🌸');
 
   // Online Room State
@@ -87,10 +97,22 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   // Save profile to localStorage
   useEffect(() => {
-    localStorage.setItem('sq_name', myName);
+    if (myName.trim()) {
+      localStorage.setItem('sq_name', myName.trim());
+    } else {
+      localStorage.removeItem('sq_name');
+    }
     localStorage.setItem('sq_gender', myGender);
     localStorage.setItem('sq_avatar', myAvatar);
   }, [myName, myGender, myAvatar]);
+
+  useEffect(() => {
+    if (p2LocalName.trim()) {
+      localStorage.setItem('sq_p2_local_name', p2LocalName.trim());
+    } else {
+      localStorage.removeItem('sq_p2_local_name');
+    }
+  }, [p2LocalName]);
 
   // Helper to save recent room
   const saveRecentRoom = (code: string) => {
@@ -115,7 +137,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const hostPlayer: Player = {
       id: 'p1',
-      name: myName.trim() || 'Dia (P1)',
+      name: myName.trim() || 'Pemain 1',
       gender: myGender,
       avatar: myAvatar,
       color: '#80DED9',
@@ -168,7 +190,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const hostPlayer: Player = {
       id: 'p1',
-      name: myName.trim() || 'Dia (P1)',
+      name: myName.trim() || 'Pemain 1',
       gender: myGender,
       avatar: myAvatar,
       color: '#80DED9',
@@ -202,7 +224,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const guestPlayer: Player = {
       id: 'p2',
-      name: myName.trim() || 'Dia (P2)',
+      name: myName.trim() || 'Pemain 2',
       gender: myGender,
       avatar: myAvatar,
       color: '#FF758F',
@@ -442,7 +464,7 @@ export const Lobby: React.FC<LobbyProps> = ({
               type="text"
               value={myName}
               onChange={(e) => setMyName(e.target.value)}
-              placeholder="Misal: Bima / Bims wife"
+              placeholder="Ketik namamu..."
               className="w-full px-3 py-2 rounded-xl bg-white border-2 border-[#1E1B18] font-bold text-sm shadow-[2px_2px_0px_#1E1B18] focus:outline-none"
             />
           </div>
@@ -690,7 +712,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   type="text"
                   value={p2LocalName}
                   onChange={(e) => setP2LocalName(e.target.value)}
-                  placeholder="Misal: Agata"
+                  placeholder="Ketik nama pasangan..."
                   required
                   className="w-full px-3 py-2 rounded-xl bg-white border-2 border-[#1E1B18] font-bold text-sm shadow-[2px_2px_0px_#1E1B18] focus:outline-none"
                 />

@@ -191,34 +191,34 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
   const canRollNow = !disabled && !isRolling && (isMyTurn || !isMultiplayer);
 
   return (
-    <div className="w-full max-w-md mx-auto px-2 my-2 z-20">
-      <div className="relative bg-[#FAF6EE] p-3 sm:p-4 rounded-3xl border-4 border-[#1E1B18] shadow-[6px_6px_0px_#1E1B18]">
+    <div className="w-full max-w-md mx-auto px-1 sm:px-2 my-1 sm:my-2 z-20">
+      <div className="relative bg-[#FAF6EE] p-2.5 sm:p-4 rounded-2xl sm:rounded-3xl border-3 sm:border-4 border-[#1E1B18] shadow-[4px_4px_0px_#1E1B18] sm:shadow-[6px_6px_0px_#1E1B18]">
         {/* Header inside hub: Room code info & Minimize */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1.5 sm:mb-2">
           {roomCode ? (
             <button
               type="button"
               onClick={copyRoomCode}
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#80DED9] border-2 border-[#1E1B18] shadow-[1.5px_1.5px_0px_#1E1B18] text-[10px] sm:text-xs font-archivo uppercase active:translate-x-0.5 active:translate-y-0.5"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#80DED9] border border-[#1E1B18] sm:border-2 shadow-[1px_1px_0px_#1E1B18] text-[9px] sm:text-xs font-archivo uppercase active:translate-x-0.5 active:translate-y-0.5"
               title="Klik untuk salin kode room"
             >
               <span>🏠 Room: {roomCode}</span>
-              {copiedCode ? <Check className="w-3 h-3 text-green-700" /> : <Copy className="w-3 h-3" />}
+              {copiedCode ? <Check className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-700" /> : <Copy className="w-2.5 h-2.5 sm:w-3 sm:h-3" />}
             </button>
           ) : (
-            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#FFD23F] border-2 border-[#1E1B18] shadow-[1.5px_1.5px_0px_#1E1B18] text-[10px] font-archivo uppercase">
-              <Sparkles className="w-3 h-3" />
-              <span>Pusat Kocok Dadu</span>
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#FFD23F] border border-[#1E1B18] sm:border-2 shadow-[1px_1px_0px_#1E1B18] text-[9px] sm:text-[10px] font-archivo uppercase">
+              <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              <span>Kocok Dadu</span>
             </div>
           )}
 
           <button
             type="button"
             onClick={() => setIsMinimized(true)}
-            className="px-2 py-0.5 rounded-full bg-white border-2 border-[#1E1B18] shadow-[1px_1px_0px_#1E1B18] text-[10px] font-bold text-gray-700 flex items-center gap-1 active:translate-x-0.5 active:translate-y-0.5"
+            className="px-2 py-0.5 rounded-full bg-white border border-[#1E1B18] sm:border-2 shadow-[1px_1px_0px_#1E1B18] text-[9px] sm:text-[10px] font-bold text-gray-700 flex items-center gap-1 active:translate-x-0.5 active:translate-y-0.5"
             title="Sembunyikan dadu untuk melihat seluruh petak"
           >
-            <Eye className="w-3 h-3" />
+            <Eye className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
             <span>Intip Papan</span>
           </button>
         </div>

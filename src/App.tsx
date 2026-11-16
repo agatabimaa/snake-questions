@@ -84,6 +84,8 @@ export const App: React.FC = () => {
   }, []);
 
   const qManagerRef = useRef<QuestionManager>(new QuestionManager('LDR'));
+  const isMovingRef = useRef(false);
+  const pendingModalRef = useRef<{ type: 'QUESTION' | 'DARE'; data: Question } | null>(null);
 
   const activePlayer = currentTurn === 'p1' ? player1 : player2;
   const otherPlayer = currentTurn === 'p1' ? player2 : player1;
@@ -349,9 +351,12 @@ export const App: React.FC = () => {
         announcer.announceDice(event.value);
         executeMovement(event.value);
       } else if (event.type === 'QUESTION_OPENED') {
-        setCurrentQuestion(event.question);
-        setGameStatus('QUESTION');
-        persistState('QUESTION', undefined, undefined, undefined, undefined, event.question);
+        if (isMovingRef.current) {
+          pendingModalRef.current = { type: 'QUESTION', data: event.question };
+        } else {
+          setCurrentQuestion(event.question);
+          setGameStatus('QUESTION');
+        }
         if (event.question.category === 'GIRL') {
           announcer.announceGirlQuestion();
         } else if (event.question.category === 'BOY') {
@@ -360,10 +365,13 @@ export const App: React.FC = () => {
           announcer.announceDeeptalkQuestion();
         }
       } else if (event.type === 'DARE_OPENED') {
-        setCurrentDare(event.dare);
-        setGameStatus('ACTION_DARE');
+        if (isMovingRef.current) {
+          pendingModalRef.current = { type: 'DARE', data: event.dare };
+        } else {
+          setCurrentDare(event.dare);
+          setGameStatus('ACTION_DARE');
+        }
         announcer.announceDare();
-        persistState('ACTION_DARE', undefined, undefined, undefined, undefined, null, event.dare);
       } else if (event.type === 'QUESTION_REROLLED') {
         setCurrentQuestion(event.question);
       } else if (event.type === 'DARE_REROLLED') {
@@ -388,14 +396,17 @@ export const App: React.FC = () => {
 
     const unsubscribeState = multiplayer.onGameState((state) => {
       if (state && state.roomCode) {
-        setPlayer1(state.player1);
-        setPlayer2(state.player2);
-        setCurrentTurn(state.currentTurn);
-        setTurnCount(state.turnCount);
-        setLogs(state.logs || []);
-        setCurrentQuestion(state.currentQuestion);
-        setCurrentDare(state.currentDare);
-        setGameStatus(state.status);
+        // Do not stomp local position during active movement animation
+        if (!isMovingRef.current) {
+          setPlayer1(state.player1);
+          setPlayer2(state.player2);
+          setCurrentTurn(state.currentTurn);
+          setTurnCount(state.turnCount);
+          setLogs(state.logs || []);
+          setCurrentQuestion(state.currentQuestion);
+          setCurrentDare(state.currentDare);
+          setGameStatus(state.status);
+        }
       }
     });
 
@@ -417,11 +428,14 @@ export const App: React.FC = () => {
     executeMovement(diceValue);
   };
 
-  // Step-by-step movement (260ms per step for clear action)
+  // Step-by-step authentic board walk (420ms per step with clear hop sound and hop animation)
   const executeMovement = (diceValue: number) => {
     setGameStatus('MOVING');
+    isMovingRef.current = true;
 
-    const startPos = activePlayer.position;
+    const movingTurn = currentTurn;
+    const movingPlayer = movingTurn === 'p1' ? player1 : player2;
+    const startPos = movingPlayer.position;
     const targetPos = Math.min(TOTAL_TILES, startPos + diceValue);
 
     let currentStep = startPos;
@@ -429,7 +443,7 @@ export const App: React.FC = () => {
       currentStep++;
       sound.playPawnHop();
 
-      if (currentTurn === 'p1') {
+      if (movingTurn === 'p1') {
         setPlayer1((prev) => ({ ...prev, position: currentStep, stepsTaken: prev.stepsTaken + 1 }));
       } else {
         setPlayer2((prev) => ({ ...prev, position: currentStep, stepsTaken: prev.stepsTaken + 1 }));
@@ -437,10 +451,26 @@ export const App: React.FC = () => {
 
       if (currentStep >= targetPos) {
         clearInterval(stepInterval);
-        // Suspense pause (650ms) so players clearly see where the pawn landed before card triggers!
-        setTimeout(() => handleTileLanded(targetPos), 650);
+        // Suspense pause (750ms) so players can clearly see where the pawn landed before card triggers!
+        setTimeout(() => {
+          isMovingRef.current = false;
+          if (pendingModalRef.current) {
+            const pending = pendingModalRef.current;
+            pendingModalRef.current = null;
+            if (pending.type === 'QUESTION') {
+              setCurrentQuestion(pending.data);
+              setGameStatus('QUESTION');
+            } else {
+              setCurrentDare(pending.data);
+              setGameStatus('ACTION_DARE');
+            }
+            return;
+          }
+
+          handleTileLanded(targetPos, movingTurn);
+        }, 750);
       }
-    }, 260);
+    }, 420);
   };
 
   // Smooth animation along ladder or snake
@@ -483,18 +513,20 @@ export const App: React.FC = () => {
   };
 
   // Handle tile landed
-  const handleTileLanded = (tileId: number) => {
+  const handleTileLanded = (tileId: number, movingTurn: 'p1' | 'p2') => {
     const tile = tiles.find((t) => t.id === tileId);
     if (!tile) {
       advanceTurn();
       return;
     }
 
+    const currentMover = movingTurn === 'p1' ? player1 : player2;
+
     // Finish
     if (tile.type === 'FINISH' || tileId >= TOTAL_TILES) {
       sound.playVictory();
-      announcer.announceVictory(activePlayer.name);
-      setWinner(activePlayer);
+      announcer.announceVictory(currentMover.name);
+      setWinner(currentMover);
       setGameStatus('VICTORY');
       persistState('VICTORY');
       return;
@@ -502,99 +534,112 @@ export const App: React.FC = () => {
 
     // Ladder
     if (tile.type === 'LADDER' && tile.targetTile) {
-      sound.playLadderClimb();
-      announcer.announceLadder(activePlayer.name);
       const target = tile.targetTile;
+      setTimeout(() => {
+        sound.playLadderClimb();
+        announcer.announceLadder(currentMover.name);
 
-      animatePawnMovement(tileId, target, 1100, () => {
-        if (currentTurn === 'p1') {
-          setPlayer1((prev) => ({ ...prev, position: target, laddersClimbed: prev.laddersClimbed + 1 }));
-        } else {
-          setPlayer2((prev) => ({ ...prev, position: target, laddersClimbed: prev.laddersClimbed + 1 }));
-        }
+        animatePawnMovement(tileId, target, 1400, () => {
+          let updatedP1 = player1;
+          let updatedP2 = player2;
+          if (movingTurn === 'p1') {
+            updatedP1 = { ...player1, position: target, laddersClimbed: player1.laddersClimbed + 1 };
+            setPlayer1(updatedP1);
+          } else {
+            updatedP2 = { ...player2, position: target, laddersClimbed: player2.laddersClimbed + 1 };
+            setPlayer2(updatedP2);
+          }
 
-        const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
-        setTimeout(() => {
-          sound.playModalPop();
-          openQuestionModal(q);
-        }, 400);
-      });
+          // Suspense pause at top of ladder (700ms)
+          setTimeout(() => {
+            const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
+            openQuestionModal(q, updatedP1, updatedP2);
+          }, 700);
+        });
+      }, 500);
       return;
     }
 
     // Snake
     if (tile.type === 'SNAKE' && tile.targetTile) {
-      sound.playSnakeSlide();
-      announcer.announceSnake(activePlayer.name);
       const target = tile.targetTile;
+      setTimeout(() => {
+        sound.playSnakeSlide();
+        announcer.announceSnake(currentMover.name);
 
-      animatePawnMovement(tileId, target, 1200, () => {
-        if (currentTurn === 'p1') {
-          setPlayer1((prev) => ({ ...prev, position: target, snakesSlid: prev.snakesSlid + 1 }));
-        } else {
-          setPlayer2((prev) => ({ ...prev, position: target, snakesSlid: prev.snakesSlid + 1 }));
-        }
+        animatePawnMovement(tileId, target, 1500, () => {
+          let updatedP1 = player1;
+          let updatedP2 = player2;
+          if (movingTurn === 'p1') {
+            updatedP1 = { ...player1, position: target, snakesSlid: player1.snakesSlid + 1 };
+            setPlayer1(updatedP1);
+          } else {
+            updatedP2 = { ...player2, position: target, snakesSlid: player2.snakesSlid + 1 };
+            setPlayer2(updatedP2);
+          }
 
-        const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
-        setTimeout(() => {
-          sound.playModalPop();
-          openQuestionModal(q);
-        }, 400);
-      });
+          // Suspense pause at bottom of snake (700ms)
+          setTimeout(() => {
+            const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
+            openQuestionModal(q, updatedP1, updatedP2);
+          }, 700);
+        });
+      }, 500);
       return;
     }
+
+    const updatedP1 = movingTurn === 'p1' ? { ...player1, position: tileId } : player1;
+    const updatedP2 = movingTurn === 'p2' ? { ...player2, position: tileId } : player2;
 
     // Question tiles with dramatic pop-up
     if (tile.type === 'BOY') {
       setTimeout(() => {
-        sound.playModalPop();
         announcer.announceBoyQuestion();
         const q = qManagerRef.current.drawQuestion('BOY');
-        openQuestionModal(q);
-      }, 350);
+        openQuestionModal(q, updatedP1, updatedP2);
+      }, 550);
       return;
     }
 
     if (tile.type === 'GIRL') {
       setTimeout(() => {
-        sound.playModalPop();
         announcer.announceGirlQuestion();
         const q = qManagerRef.current.drawQuestion('GIRL');
-        openQuestionModal(q);
-      }, 350);
+        openQuestionModal(q, updatedP1, updatedP2);
+      }, 550);
       return;
     }
 
     if (tile.type === 'DEEPTALK') {
       setTimeout(() => {
-        sound.playModalPop();
         announcer.announceDeeptalkQuestion();
         const q = qManagerRef.current.drawQuestion('DEEPTALK');
-        openQuestionModal(q);
-      }, 350);
+        openQuestionModal(q, updatedP1, updatedP2);
+      }, 550);
       return;
     }
 
     if (tile.type === 'ACTION') {
       setTimeout(() => {
-        sound.playModalPop();
         announcer.announceDare();
         const dare = qManagerRef.current.drawQuestion('VIRTUAL_DARE');
-        openDareModal(dare);
-      }, 350);
+        openDareModal(dare, updatedP1, updatedP2);
+      }, 550);
       return;
     }
 
     // Chill tile: brief pause then next turn
     setTimeout(() => {
       advanceTurn();
-    }, 500);
+    }, 800);
   };
 
-  const openQuestionModal = (q: Question) => {
+  const openQuestionModal = (q: Question, p1?: Player, p2?: Player) => {
     setCurrentQuestion(q);
     setGameStatus('QUESTION');
-    persistState('QUESTION', undefined, undefined, undefined, undefined, q);
+    const uP1 = p1 || player1;
+    const uP2 = p2 || player2;
+    persistState('QUESTION', uP1, uP2, undefined, undefined, q);
     if (isMultiplayer) {
       multiplayer.send({
         type: 'QUESTION_OPENED',
@@ -603,10 +648,12 @@ export const App: React.FC = () => {
     }
   };
 
-  const openDareModal = (dare: Question) => {
+  const openDareModal = (dare: Question, p1?: Player, p2?: Player) => {
     setCurrentDare(dare);
     setGameStatus('ACTION_DARE');
-    persistState('ACTION_DARE', undefined, undefined, undefined, undefined, null, dare);
+    const uP1 = p1 || player1;
+    const uP2 = p2 || player2;
+    persistState('ACTION_DARE', uP1, uP2, undefined, undefined, null, dare);
     if (isMultiplayer) {
       multiplayer.send({
         type: 'DARE_OPENED',
@@ -826,13 +873,13 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Floating Animated Game Announcer Subtitle Bubble */}
+      {/* Floating Animated Game Announcer Subtitle Bubble - Placed at TOP so it never blocks the board */}
       {announcerSubtitle && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] px-4 py-2.5 rounded-2xl bg-[#FFD23F] border-3 border-[#1E1B18] shadow-[5px_5px_0px_#1E1B18] animate-in slide-in-from-bottom-3 fade-in flex items-center gap-3 pointer-events-none">
-          <div className="w-8 h-8 rounded-xl bg-white border-2 border-[#1E1B18] flex items-center justify-center text-base shadow-[1.5px_1.5px_0px_#1E1B18] shrink-0 animate-bounce">
+        <div className="fixed top-14 sm:top-20 left-1/2 -translate-x-1/2 z-40 max-w-sm w-[92%] px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-[#FFD23F] border-2 sm:border-3 border-[#1E1B18] shadow-[3px_3px_0px_#1E1B18] sm:shadow-[5px_5px_0px_#1E1B18] animate-in slide-in-from-top-3 fade-in flex items-center gap-2.5 pointer-events-none">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-white border-2 border-[#1E1B18] flex items-center justify-center text-sm sm:text-base shadow-[1px_1px_0px_#1E1B18] shrink-0 animate-bounce">
             🎙️
           </div>
-          <p className="font-archivo text-xs sm:text-sm text-[#1E1B18] uppercase tracking-wide leading-tight font-black">
+          <p className="font-archivo text-[11px] sm:text-sm text-[#1E1B18] uppercase tracking-wide leading-tight font-black">
             "{announcerSubtitle}"
           </p>
         </div>

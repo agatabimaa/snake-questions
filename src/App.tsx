@@ -21,10 +21,10 @@ export const App: React.FC = () => {
   const [myRole, setMyRole] = useState<'p1' | 'p2' | 'local'>('local');
   const [activeRoomCode, setActiveRoomCode] = useState<string>('');
 
-  // Players
+  // Players (generic defaults, replaced by Lobby inputs)
   const [player1, setPlayer1] = useState<Player>({
     id: 'p1',
-    name: 'Bima',
+    name: 'Pemain 1',
     gender: 'BOY',
     avatar: '🦁',
     color: '#80DED9',
@@ -39,7 +39,7 @@ export const App: React.FC = () => {
 
   const [player2, setPlayer2] = useState<Player>({
     id: 'p2',
-    name: 'Agata',
+    name: 'Pemain 2',
     gender: 'GIRL',
     avatar: '🌸',
     color: '#FF758F',
@@ -85,7 +85,25 @@ export const App: React.FC = () => {
 
   const qManagerRef = useRef<QuestionManager>(new QuestionManager('LDR'));
   const isMovingRef = useRef(false);
+  const activeMovementIntervalRef = useRef<any>(null);
+  const lastStateTimestampRef = useRef<number>(Date.now());
   const pendingModalRef = useRef<{ type: 'QUESTION' | 'DARE'; data: Question } | null>(null);
+
+  const player1Ref = useRef<Player>(player1);
+  const player2Ref = useRef<Player>(player2);
+  const currentTurnRef = useRef<'p1' | 'p2'>(currentTurn);
+
+  useEffect(() => {
+    player1Ref.current = player1;
+  }, [player1]);
+
+  useEffect(() => {
+    player2Ref.current = player2;
+  }, [player2]);
+
+  useEffect(() => {
+    currentTurnRef.current = currentTurn;
+  }, [currentTurn]);
 
   const activePlayer = currentTurn === 'p1' ? player1 : player2;
   const otherPlayer = currentTurn === 'p1' ? player2 : player1;
@@ -101,13 +119,16 @@ export const App: React.FC = () => {
     updatedQ?: Question | null,
     updatedDare?: Question | null
   ) => {
-    const p1 = updatedP1 || player1;
-    const p2 = updatedP2 || player2;
+    const p1 = updatedP1 || player1Ref.current;
+    const p2 = updatedP2 || player2Ref.current;
     const status = updatedStatus || gameStatus;
-    const turn = updatedTurn || currentTurn;
+    const turn = updatedTurn || currentTurnRef.current;
     const logList = updatedLogs || logs;
     const q = updatedQ !== undefined ? updatedQ : currentQuestion;
     const d = updatedDare !== undefined ? updatedDare : currentDare;
+
+    const now = Date.now();
+    lastStateTimestampRef.current = now;
 
     const syncedState: SyncedGameState = {
       roomCode: activeRoomCode,
@@ -120,7 +141,7 @@ export const App: React.FC = () => {
       currentDare: d,
       logs: logList,
       winner,
-      lastUpdated: Date.now(),
+      lastUpdated: now,
     };
 
     localStorage.setItem('sq_active_game_state', JSON.stringify(syncedState));
@@ -132,7 +153,7 @@ export const App: React.FC = () => {
       isMultiplayer,
       myPlayer: myRole === 'p2' ? p2 : p1,
       otherPlayer: myRole === 'p2' ? p1 : p2,
-      lastActive: Date.now(),
+      lastActive: now,
     };
     localStorage.setItem('sq_active_session', JSON.stringify(sessionData));
 
@@ -349,7 +370,7 @@ export const App: React.FC = () => {
     const unsubscribeEvents = multiplayer.onEvent((event) => {
       if (event.type === 'DICE_ROLL') {
         announcer.announceDice(event.value);
-        executeMovement(event.value);
+        executeMovement(event.value, event.turn, event.fromPos, event.targetPos);
       } else if (event.type === 'QUESTION_OPENED') {
         if (isMovingRef.current) {
           pendingModalRef.current = { type: 'QUESTION', data: event.question };
@@ -378,15 +399,19 @@ export const App: React.FC = () => {
         setCurrentDare(event.dare);
       } else if (event.type === 'TURN_COMPLETED') {
         if (event.log) {
-          setLogs((prev) => [event.log!, ...prev]);
+          setLogs((prev) => {
+            if (prev.some((l) => l.id === event.log!.id)) return prev;
+            return [event.log!, ...prev];
+          });
         }
         setCurrentQuestion(null);
         setCurrentDare(null);
         setCurrentTurn(event.nextTurn);
+        currentTurnRef.current = event.nextTurn;
         setTurnCount((prev) => prev + 1);
         setGameStatus('PLAYING');
         setTimeout(() => {
-          announcer.announceTurn(event.nextTurn === 'p1' ? player1.name : player2.name);
+          announcer.announceTurn(event.nextTurn === 'p1' ? player1Ref.current.name : player2Ref.current.name);
         }, 450);
       } else if (event.type === 'RESTART_GAME') {
         clearAllSessionData();
@@ -396,16 +421,27 @@ export const App: React.FC = () => {
 
     const unsubscribeState = multiplayer.onGameState((state) => {
       if (state && state.roomCode) {
+        // Discard outdated state from network/broker retained buffer
+        if (state.lastUpdated && state.lastUpdated < lastStateTimestampRef.current) {
+          return;
+        }
+        lastStateTimestampRef.current = state.lastUpdated || Date.now();
+
         // Do not stomp local position during active movement animation
         if (!isMovingRef.current) {
           setPlayer1(state.player1);
+          player1Ref.current = state.player1;
           setPlayer2(state.player2);
+          player2Ref.current = state.player2;
           setCurrentTurn(state.currentTurn);
+          currentTurnRef.current = state.currentTurn;
           setTurnCount(state.turnCount);
           setLogs(state.logs || []);
           setCurrentQuestion(state.currentQuestion);
           setCurrentDare(state.currentDare);
-          setGameStatus(state.status);
+          if (state.status && state.status !== 'MOVING') {
+            setGameStatus(state.status);
+          }
         }
       }
     });
@@ -414,43 +450,80 @@ export const App: React.FC = () => {
       unsubscribeEvents();
       unsubscribeState();
     };
-  }, [currentTurn, player1, player2]);
+  }, [activeRoomCode, isMultiplayer]);
 
   // Roll completed
   const handleLocalRollComplete = (diceValue: number) => {
+    const turn = currentTurnRef.current;
+    const mover = turn === 'p1' ? player1Ref.current : player2Ref.current;
+    const startPos = mover.position;
+    const targetPos = Math.min(TOTAL_TILES, Math.max(startPos, startPos + diceValue));
+
     if (isMultiplayer) {
       multiplayer.send({
         type: 'DICE_ROLL',
         value: diceValue,
         power: 60,
+        turn,
+        fromPos: startPos,
+        targetPos,
       });
     }
-    executeMovement(diceValue);
+    executeMovement(diceValue, turn, startPos, targetPos);
   };
 
   // Step-by-step authentic board walk (420ms per step with clear hop sound and hop animation)
-  const executeMovement = (diceValue: number) => {
+  const executeMovement = (
+    diceValue: number,
+    explicitTurn?: 'p1' | 'p2',
+    explicitFromPos?: number,
+    explicitTargetPos?: number
+  ) => {
+    // If already moving, clear previous interval to prevent concurrent race
+    if (activeMovementIntervalRef.current) {
+      clearInterval(activeMovementIntervalRef.current);
+      activeMovementIntervalRef.current = null;
+    }
+
     setGameStatus('MOVING');
     isMovingRef.current = true;
 
-    const movingTurn = currentTurn;
-    const movingPlayer = movingTurn === 'p1' ? player1 : player2;
-    const startPos = movingPlayer.position;
-    const targetPos = Math.min(TOTAL_TILES, startPos + diceValue);
+    const movingTurn = explicitTurn || currentTurnRef.current;
+    const movingPlayer = movingTurn === 'p1' ? player1Ref.current : player2Ref.current;
+    const startPos = explicitFromPos !== undefined ? explicitFromPos : movingPlayer.position;
+    const targetPos = explicitTargetPos !== undefined ? explicitTargetPos : Math.min(TOTAL_TILES, Math.max(startPos, startPos + diceValue));
 
     let currentStep = startPos;
-    const stepInterval = setInterval(() => {
+    if (currentStep >= targetPos) {
+      isMovingRef.current = false;
+      handleTileLanded(targetPos, movingTurn);
+      return;
+    }
+
+    activeMovementIntervalRef.current = setInterval(() => {
       currentStep++;
       sound.playPawnHop();
 
       if (movingTurn === 'p1') {
-        setPlayer1((prev) => ({ ...prev, position: currentStep, stepsTaken: prev.stepsTaken + 1 }));
+        setPlayer1((prev) => {
+          const updated = { ...prev, position: currentStep, stepsTaken: prev.stepsTaken + 1 };
+          player1Ref.current = updated;
+          return updated;
+        });
       } else {
-        setPlayer2((prev) => ({ ...prev, position: currentStep, stepsTaken: prev.stepsTaken + 1 }));
+        setPlayer2((prev) => {
+          const updated = { ...prev, position: currentStep, stepsTaken: prev.stepsTaken + 1 };
+          player2Ref.current = updated;
+          return updated;
+        });
       }
 
       if (currentStep >= targetPos) {
-        clearInterval(stepInterval);
+        if (activeMovementIntervalRef.current) {
+          clearInterval(activeMovementIntervalRef.current);
+          activeMovementIntervalRef.current = null;
+        }
+
         // Suspense pause (750ms) so players can clearly see where the pawn landed before card triggers!
         setTimeout(() => {
           isMovingRef.current = false;
@@ -478,6 +551,7 @@ export const App: React.FC = () => {
     fromTile: number,
     toTile: number,
     durationMs: number,
+    playerId: 'p1' | 'p2',
     onFinish: () => void
   ) => {
     const start = getTileCoordinates(fromTile);
@@ -496,7 +570,7 @@ export const App: React.FC = () => {
       const currentY = (start.y + (end.y - start.y) * easeProgress) / 10;
 
       setAnimatingPawn({
-        playerId: currentTurn,
+        playerId,
         xPercent: currentX,
         yPercent: currentY,
       });
@@ -520,7 +594,7 @@ export const App: React.FC = () => {
       return;
     }
 
-    const currentMover = movingTurn === 'p1' ? player1 : player2;
+    const currentMover = movingTurn === 'p1' ? player1Ref.current : player2Ref.current;
 
     // Finish
     if (tile.type === 'FINISH' || tileId >= TOTAL_TILES) {
@@ -528,7 +602,7 @@ export const App: React.FC = () => {
       announcer.announceVictory(currentMover.name);
       setWinner(currentMover);
       setGameStatus('VICTORY');
-      persistState('VICTORY');
+      persistState('VICTORY', player1Ref.current, player2Ref.current);
       return;
     }
 
@@ -539,14 +613,16 @@ export const App: React.FC = () => {
         sound.playLadderClimb();
         announcer.announceLadder(currentMover.name);
 
-        animatePawnMovement(tileId, target, 1400, () => {
-          let updatedP1 = player1;
-          let updatedP2 = player2;
+        animatePawnMovement(tileId, target, 1400, movingTurn, () => {
+          let updatedP1 = player1Ref.current;
+          let updatedP2 = player2Ref.current;
           if (movingTurn === 'p1') {
-            updatedP1 = { ...player1, position: target, laddersClimbed: player1.laddersClimbed + 1 };
+            updatedP1 = { ...updatedP1, position: target, laddersClimbed: updatedP1.laddersClimbed + 1 };
+            player1Ref.current = updatedP1;
             setPlayer1(updatedP1);
           } else {
-            updatedP2 = { ...player2, position: target, laddersClimbed: player2.laddersClimbed + 1 };
+            updatedP2 = { ...updatedP2, position: target, laddersClimbed: updatedP2.laddersClimbed + 1 };
+            player2Ref.current = updatedP2;
             setPlayer2(updatedP2);
           }
 
@@ -567,14 +643,16 @@ export const App: React.FC = () => {
         sound.playSnakeSlide();
         announcer.announceSnake(currentMover.name);
 
-        animatePawnMovement(tileId, target, 1500, () => {
-          let updatedP1 = player1;
-          let updatedP2 = player2;
+        animatePawnMovement(tileId, target, 1500, movingTurn, () => {
+          let updatedP1 = player1Ref.current;
+          let updatedP2 = player2Ref.current;
           if (movingTurn === 'p1') {
-            updatedP1 = { ...player1, position: target, snakesSlid: player1.snakesSlid + 1 };
+            updatedP1 = { ...updatedP1, position: target, snakesSlid: updatedP1.snakesSlid + 1 };
+            player1Ref.current = updatedP1;
             setPlayer1(updatedP1);
           } else {
-            updatedP2 = { ...player2, position: target, snakesSlid: player2.snakesSlid + 1 };
+            updatedP2 = { ...updatedP2, position: target, snakesSlid: updatedP2.snakesSlid + 1 };
+            player2Ref.current = updatedP2;
             setPlayer2(updatedP2);
           }
 
@@ -588,8 +666,12 @@ export const App: React.FC = () => {
       return;
     }
 
-    const updatedP1 = movingTurn === 'p1' ? { ...player1, position: tileId } : player1;
-    const updatedP2 = movingTurn === 'p2' ? { ...player2, position: tileId } : player2;
+    const updatedP1 = movingTurn === 'p1' ? { ...player1Ref.current, position: tileId } : player1Ref.current;
+    const updatedP2 = movingTurn === 'p2' ? { ...player2Ref.current, position: tileId } : player2Ref.current;
+    player1Ref.current = updatedP1;
+    player2Ref.current = updatedP2;
+    setPlayer1(updatedP1);
+    setPlayer2(updatedP2);
 
     // Question tiles with dramatic pop-up
     if (tile.type === 'BOY') {
@@ -637,8 +719,8 @@ export const App: React.FC = () => {
   const openQuestionModal = (q: Question, p1?: Player, p2?: Player) => {
     setCurrentQuestion(q);
     setGameStatus('QUESTION');
-    const uP1 = p1 || player1;
-    const uP2 = p2 || player2;
+    const uP1 = p1 || player1Ref.current;
+    const uP2 = p2 || player2Ref.current;
     persistState('QUESTION', uP1, uP2, undefined, undefined, q);
     if (isMultiplayer) {
       multiplayer.send({
@@ -651,8 +733,8 @@ export const App: React.FC = () => {
   const openDareModal = (dare: Question, p1?: Player, p2?: Player) => {
     setCurrentDare(dare);
     setGameStatus('ACTION_DARE');
-    const uP1 = p1 || player1;
-    const uP2 = p2 || player2;
+    const uP1 = p1 || player1Ref.current;
+    const uP2 = p2 || player2Ref.current;
     persistState('ACTION_DARE', uP1, uP2, undefined, undefined, null, dare);
     if (isMultiplayer) {
       multiplayer.send({
@@ -681,9 +763,17 @@ export const App: React.FC = () => {
       setLogs(nextLogs);
 
       if (currentTurn === 'p1') {
-        setPlayer1((prev) => ({ ...prev, questionsAnswered: prev.questionsAnswered + 1 }));
+        setPlayer1((prev) => {
+          const updated = { ...prev, questionsAnswered: prev.questionsAnswered + 1 };
+          player1Ref.current = updated;
+          return updated;
+        });
       } else {
-        setPlayer2((prev) => ({ ...prev, questionsAnswered: prev.questionsAnswered + 1 }));
+        setPlayer2((prev) => {
+          const updated = { ...prev, questionsAnswered: prev.questionsAnswered + 1 };
+          player2Ref.current = updated;
+          return updated;
+        });
       }
     }
 
@@ -739,7 +829,7 @@ export const App: React.FC = () => {
   };
 
   const advanceTurn = (log?: AnsweredLog, updatedLogs?: AnsweredLog[]) => {
-    const nextTurn = currentTurn === 'p1' ? 'p2' : 'p1';
+    const nextTurn = currentTurnRef.current === 'p1' ? 'p2' : 'p1';
     if (isMultiplayer) {
       multiplayer.send({
         type: 'TURN_COMPLETED',
@@ -748,11 +838,12 @@ export const App: React.FC = () => {
       });
     }
     setCurrentTurn(nextTurn);
+    currentTurnRef.current = nextTurn;
     setTurnCount((prev) => prev + 1);
     setGameStatus('PLAYING');
-    persistState('PLAYING', undefined, undefined, nextTurn, updatedLogs, null, null);
+    persistState('PLAYING', player1Ref.current, player2Ref.current, nextTurn, updatedLogs, null, null);
     setTimeout(() => {
-      announcer.announceTurn(nextTurn === 'p1' ? player1.name : player2.name);
+      announcer.announceTurn(nextTurn === 'p1' ? player1Ref.current.name : player2Ref.current.name);
     }, 450);
   };
 

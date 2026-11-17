@@ -150,14 +150,15 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({
         sound.playDiceLand(finalVal);
         announcer.announceDice(finalVal);
 
-        // Feedback toast
+        // Feedback toast with explicit destination petak
         let comment = '';
+        const targetPreview = Math.min(49, activePlayer.position + finalVal);
         if (finalVal === 1) {
-          comment = '😅 Dadu 1! Santai, pelan-pelan tapi pasti.';
+          comment = `😅 Dadu 1! Maju santai ke Petak ${targetPreview}`;
         } else if (finalVal === 6) {
-          comment = '🔥 HOKI MAKSIMAL! Dadu 6 mendarat!';
+          comment = `🔥 HOKI MAKSIMAL! Dadu 6 meluncur ke Petak ${targetPreview}!`;
         } else {
-          comment = `🎲 Dadu ${finalVal}! Melangkah bersama.`;
+          comment = `🎲 Dadu ${finalVal}! Maju ke Petak ${targetPreview}`;
         }
         setToastComment(comment);
 

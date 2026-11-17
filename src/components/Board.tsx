@@ -68,6 +68,19 @@ export const Board: React.FC<BoardProps> = ({
     }
   };
 
+  // Path progression direction arrow indicator so players always know which way is forward
+  const getPathArrow = (tileId: number): string | null => {
+    if (tileId >= TOTAL_TILES) return null;
+    // Row turning points: pointing UP to the next row
+    if ([7, 14, 21, 28, 35, 42].includes(tileId)) {
+      return '↑';
+    }
+    const rowFromBottom = Math.floor((tileId - 1) / GRID_SIZE);
+    // Even rowFromBottom (0, 2, 4, 6) flows Left-to-Right (→)
+    // Odd rowFromBottom (1, 3, 5) flows Right-to-Left (←)
+    return rowFromBottom % 2 === 0 ? '→' : '←';
+  };
+
   return (
     <div className="w-full max-w-xl mx-auto p-1 sm:p-2 select-none">
       {/* Category Legend & 3D Toggle */}
@@ -129,6 +142,7 @@ export const Board: React.FC<BoardProps> = ({
               const isP2StaticHere = !animatingPawn && player2.position === tile.id;
               const badge = getTileBadge(tile);
               const bgColor = getTileColor(tile.id);
+              const arrow = getPathArrow(tile.id);
 
               return (
                 <div
@@ -137,11 +151,23 @@ export const Board: React.FC<BoardProps> = ({
                   style={{ backgroundColor: bgColor }}
                   className="relative border border-[#1E1B18]/40 p-1 sm:p-1.5 flex flex-col justify-between hover:brightness-95 transition-all shadow-inner"
                 >
-                  {/* Tile Header: Number & Category Icon */}
+                  {/* Tile Header: Number with Path Direction Arrow & Category Icon */}
                   <div className="flex items-center justify-between leading-none">
-                    <span className="font-archivo text-xs sm:text-sm text-[#1E1B18] font-bold drop-shadow-sm">
-                      {tile.id}
-                    </span>
+                    <div className="flex items-center gap-0.5">
+                      <span className="font-archivo text-xs sm:text-sm text-[#1E1B18] font-bold drop-shadow-sm">
+                        {tile.id}
+                      </span>
+                      {arrow && (
+                        <span
+                          className={`text-[9px] sm:text-[10px] font-black leading-none drop-shadow-sm ${
+                            arrow === '↑' ? 'text-[#FF5964] font-extrabold animate-pulse' : 'text-[#1E1B18]/50'
+                          }`}
+                          title={arrow === '↑' ? 'Belok naik ke petak berikutnya' : 'Arah jalan'}
+                        >
+                          {arrow}
+                        </span>
+                      )}
+                    </div>
                     {badge.icon && (
                       <span className="text-xs sm:text-base leading-none drop-shadow-sm">
                         {badge.icon}

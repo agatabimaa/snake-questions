@@ -2,19 +2,20 @@ import mqtt, { MqttClient } from 'mqtt';
 import { Player, Question, AnsweredLog, SyncedGameState } from '../types/game';
 
 export type NetworkEvent =
-  | { type: 'GUEST_JOINED'; player: Player }
-  | { type: 'START_GAME'; player1: Player; player2: Player }
-  | { type: 'DICE_ROLL'; value: number; power: number }
-  | { type: 'QUESTION_OPENED'; question: Question }
-  | { type: 'DARE_OPENED'; dare: Question }
-  | { type: 'QUESTION_REROLLED'; question: Question }
-  | { type: 'DARE_REROLLED'; dare: Question }
-  | { type: 'TURN_COMPLETED'; nextTurn: 'p1' | 'p2'; log?: AnsweredLog }
-  | { type: 'GAME_STATE_SYNC'; state: SyncedGameState }
-  | { type: 'RESTART_GAME' };
+  | { type: 'GUEST_JOINED'; player: Player; senderId?: string }
+  | { type: 'START_GAME'; player1: Player; player2: Player; senderId?: string }
+  | { type: 'DICE_ROLL'; value: number; power: number; turn?: 'p1' | 'p2'; fromPos?: number; targetPos?: number; senderId?: string }
+  | { type: 'QUESTION_OPENED'; question: Question; senderId?: string }
+  | { type: 'DARE_OPENED'; dare: Question; senderId?: string }
+  | { type: 'QUESTION_REROLLED'; question: Question; senderId?: string }
+  | { type: 'DARE_REROLLED'; dare: Question; senderId?: string }
+  | { type: 'TURN_COMPLETED'; nextTurn: 'p1' | 'p2'; log?: AnsweredLog; senderId?: string }
+  | { type: 'GAME_STATE_SYNC'; state: SyncedGameState; senderId?: string }
+  | { type: 'RESTART_GAME'; senderId?: string };
 
 class MultiplayerService {
   private client: MqttClient | null = null;
+  public clientId: string = `sq-${Math.random().toString(36).substring(2, 9)}-${Date.now().toString(36)}`;
   public isHost: boolean = false;
   public roomCode: string = '';
   private hostHeartbeatTimer: any = null;
@@ -44,7 +45,7 @@ class MultiplayerService {
 
       this.cleanup();
 
-      const clientId = `sq-${Math.random().toString(36).substring(2, 9)}`;
+      const clientId = this.clientId;
       const brokers = [
         'wss://broker.emqx.io:8084/mqtt',
         'wss://broker.hivemq.com:8884/mqtt',
@@ -280,7 +281,8 @@ class MultiplayerService {
   public publishGameState(state: SyncedGameState) {
     if (this.client && this.client.connected && this.roomCode) {
       const topicState = `snake-questions/v2/${this.roomCode}/state`;
-      this.client.publish(topicState, JSON.stringify(state), { retain: true, qos: 1 });
+      const payload = JSON.stringify({ ...state, senderId: this.clientId });
+      this.client.publish(topicState, payload, { retain: true, qos: 1 });
     }
   }
 
@@ -292,6 +294,11 @@ class MultiplayerService {
       try {
         const text = payload.toString();
         const msg = JSON.parse(text);
+
+        // Prevent self-echo loop: ignore messages sent by this client
+        if (msg && msg.senderId && msg.senderId === this.clientId) {
+          return;
+        }
 
         if (topic.endsWith('/state')) {
           if (msg && msg.roomCode) {
@@ -310,7 +317,8 @@ class MultiplayerService {
   public send(event: NetworkEvent) {
     if (this.client && this.client.connected && this.roomCode) {
       const topicEvents = `snake-questions/v2/${this.roomCode}/events`;
-      this.client.publish(topicEvents, JSON.stringify(event), { qos: 1 });
+      const payload = JSON.stringify({ ...event, senderId: this.clientId });
+      this.client.publish(topicEvents, payload, { qos: 1 });
     }
   }
 

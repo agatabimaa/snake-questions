@@ -85,6 +85,7 @@ export interface SyncedGameState {
   logs: AnsweredLog[];
   winner: Player | null;
   lastUpdated: number;
+  senderId?: string;
 }
 
 export interface StoredSession {

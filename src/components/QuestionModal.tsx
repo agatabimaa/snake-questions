@@ -23,11 +23,12 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({
 
   useEffect(() => {
     sound.playCardFlip();
+    setIsFlipped(false);
     const timer = setTimeout(() => {
       setIsFlipped(true);
-    }, 150);
+    }, 120);
     return () => clearTimeout(timer);
-  }, []);
+  }, [question.id]);
 
   const handleReroll = () => {
     sound.playCardFlip();

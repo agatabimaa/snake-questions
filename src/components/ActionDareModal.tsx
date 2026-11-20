@@ -25,11 +25,12 @@ export const ActionDareModal: React.FC<ActionDareModalProps> = ({
 
   useEffect(() => {
     sound.playCardFlip();
+    setIsFlipped(false);
     const timer = setTimeout(() => {
       setIsFlipped(true);
-    }, 150);
+    }, 120);
     return () => clearTimeout(timer);
-  }, []);
+  }, [dare.id]);
 
   const handleReroll = () => {
     sound.playCardFlip();

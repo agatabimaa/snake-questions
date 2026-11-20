@@ -32,6 +32,10 @@ export class QuestionManager {
     this.resetPools();
   }
 
+  public markUsed(id: string) {
+    this.usedIds.add(id);
+  }
+
   public resetPools() {
     this.usedIds.clear();
     this.pools.BOY = this.shuffle([...BOY_QUESTIONS]);

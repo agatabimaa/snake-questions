@@ -372,30 +372,36 @@ export const App: React.FC = () => {
         announcer.announceDice(event.value);
         executeMovement(event.value, event.turn, event.fromPos, event.targetPos);
       } else if (event.type === 'QUESTION_OPENED') {
+        qManagerRef.current.markUsed(event.question.id);
         if (isMovingRef.current) {
           pendingModalRef.current = { type: 'QUESTION', data: event.question };
         } else {
           setCurrentQuestion(event.question);
           setGameStatus('QUESTION');
-        }
-        if (event.question.category === 'GIRL') {
-          announcer.announceGirlQuestion();
-        } else if (event.question.category === 'BOY') {
-          announcer.announceBoyQuestion();
-        } else if (event.question.category === 'DEEPTALK') {
-          announcer.announceDeeptalkQuestion();
+          if (event.question.category === 'GIRL') {
+            announcer.announceGirlQuestion();
+          } else if (event.question.category === 'BOY') {
+            announcer.announceBoyQuestion();
+          } else if (event.question.category === 'DEEPTALK') {
+            announcer.announceDeeptalkQuestion();
+          }
         }
       } else if (event.type === 'DARE_OPENED') {
+        qManagerRef.current.markUsed(event.dare.id);
         if (isMovingRef.current) {
           pendingModalRef.current = { type: 'DARE', data: event.dare };
         } else {
           setCurrentDare(event.dare);
           setGameStatus('ACTION_DARE');
+          announcer.announceDare();
         }
-        announcer.announceDare();
       } else if (event.type === 'QUESTION_REROLLED') {
+        qManagerRef.current.markUsed(event.question.id);
+        sound.playCardFlip();
         setCurrentQuestion(event.question);
       } else if (event.type === 'DARE_REROLLED') {
+        qManagerRef.current.markUsed(event.dare.id);
+        sound.playCardFlip();
         setCurrentDare(event.dare);
       } else if (event.type === 'TURN_COMPLETED') {
         if (event.log) {
@@ -428,7 +434,13 @@ export const App: React.FC = () => {
         lastStateTimestampRef.current = state.lastUpdated || Date.now();
 
         // Do not stomp local position during active movement animation
-        if (!isMovingRef.current) {
+        if (isMovingRef.current) {
+          if (state.currentQuestion) {
+            pendingModalRef.current = { type: 'QUESTION', data: state.currentQuestion };
+          } else if (state.currentDare) {
+            pendingModalRef.current = { type: 'DARE', data: state.currentDare };
+          }
+        } else {
           setPlayer1(state.player1);
           player1Ref.current = state.player1;
           setPlayer2(state.player2);
@@ -470,6 +482,30 @@ export const App: React.FC = () => {
       });
     }
     executeMovement(diceValue, turn, startPos, targetPos);
+  };
+
+  const openPendingModal = () => {
+    if (pendingModalRef.current) {
+      const pending = pendingModalRef.current;
+      pendingModalRef.current = null;
+      if (pending.type === 'QUESTION') {
+        setCurrentQuestion(pending.data);
+        setGameStatus('QUESTION');
+        if (pending.data.category === 'GIRL') {
+          announcer.announceGirlQuestion();
+        } else if (pending.data.category === 'BOY') {
+          announcer.announceBoyQuestion();
+        } else if (pending.data.category === 'DEEPTALK') {
+          announcer.announceDeeptalkQuestion();
+        }
+      } else {
+        setCurrentDare(pending.data);
+        setGameStatus('ACTION_DARE');
+        announcer.announceDare();
+      }
+      return true;
+    }
+    return false;
   };
 
   // Step-by-step authentic board walk (420ms per step with clear hop sound and hop animation)
@@ -527,19 +563,6 @@ export const App: React.FC = () => {
         // Suspense pause (750ms) so players can clearly see where the pawn landed before card triggers!
         setTimeout(() => {
           isMovingRef.current = false;
-          if (pendingModalRef.current) {
-            const pending = pendingModalRef.current;
-            pendingModalRef.current = null;
-            if (pending.type === 'QUESTION') {
-              setCurrentQuestion(pending.data);
-              setGameStatus('QUESTION');
-            } else {
-              setCurrentDare(pending.data);
-              setGameStatus('ACTION_DARE');
-            }
-            return;
-          }
-
           handleTileLanded(targetPos, movingTurn);
         }, 750);
       }
@@ -589,8 +612,10 @@ export const App: React.FC = () => {
   // Handle tile landed
   const handleTileLanded = (tileId: number, movingTurn: 'p1' | 'p2') => {
     const tile = tiles.find((t) => t.id === tileId);
+    const isMover = !isMultiplayer || movingTurn === myRole;
+
     if (!tile) {
-      advanceTurn();
+      if (isMover) advanceTurn();
       return;
     }
 
@@ -602,13 +627,16 @@ export const App: React.FC = () => {
       announcer.announceVictory(currentMover.name);
       setWinner(currentMover);
       setGameStatus('VICTORY');
-      persistState('VICTORY', player1Ref.current, player2Ref.current);
+      if (isMover) {
+        persistState('VICTORY', player1Ref.current, player2Ref.current);
+      }
       return;
     }
 
     // Ladder
     if (tile.type === 'LADDER' && tile.targetTile) {
       const target = tile.targetTile;
+      isMovingRef.current = true;
       setTimeout(() => {
         sound.playLadderClimb();
         announcer.announceLadder(currentMover.name);
@@ -628,8 +656,13 @@ export const App: React.FC = () => {
 
           // Suspense pause at top of ladder (700ms)
           setTimeout(() => {
-            const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
-            openQuestionModal(q, updatedP1, updatedP2);
+            isMovingRef.current = false;
+            if (isMover) {
+              const q = qManagerRef.current.drawQuestion('LADDER_APPRECIATION');
+              openQuestionModal(q, updatedP1, updatedP2);
+            } else {
+              openPendingModal();
+            }
           }, 700);
         });
       }, 500);
@@ -639,6 +672,7 @@ export const App: React.FC = () => {
     // Snake
     if (tile.type === 'SNAKE' && tile.targetTile) {
       const target = tile.targetTile;
+      isMovingRef.current = true;
       setTimeout(() => {
         sound.playSnakeSlide();
         announcer.announceSnake(currentMover.name);
@@ -658,8 +692,13 @@ export const App: React.FC = () => {
 
           // Suspense pause at bottom of snake (700ms)
           setTimeout(() => {
-            const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
-            openQuestionModal(q, updatedP1, updatedP2);
+            isMovingRef.current = false;
+            if (isMover) {
+              const q = qManagerRef.current.drawQuestion('SNAKE_REFLECTION');
+              openQuestionModal(q, updatedP1, updatedP2);
+            } else {
+              openPendingModal();
+            }
           }, 700);
         });
       }, 500);
@@ -673,7 +712,14 @@ export const App: React.FC = () => {
     setPlayer1(updatedP1);
     setPlayer2(updatedP2);
 
-    // Question tiles with dramatic pop-up
+    if (!isMover) {
+      // Non-moving partner: NEVER independently draw questions/dares!
+      // If mover's modal already arrived while moving, open it now!
+      openPendingModal();
+      return;
+    }
+
+    // Question tiles with dramatic pop-up (active mover only)
     if (tile.type === 'BOY') {
       setTimeout(() => {
         announcer.announceBoyQuestion();
@@ -710,7 +756,7 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Chill tile: brief pause then next turn
+    // Chill tile: brief pause then next turn (only mover advances)
     setTimeout(() => {
       advanceTurn();
     }, 800);
@@ -746,35 +792,35 @@ export const App: React.FC = () => {
 
   // Complete question answer
   const handleAnswerComplete = () => {
+    if (!currentQuestion) return;
+
     let newLog: AnsweredLog | undefined = undefined;
     let nextLogs = logs;
 
-    if (currentQuestion) {
-      newLog = {
-        id: `log-${Date.now()}`,
-        playerName: activePlayer.name,
-        playerAvatar: activePlayer.avatar,
-        category: currentQuestion.category,
-        questionText: currentQuestion.question,
-        turnNumber: turnCount,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      nextLogs = [newLog, ...logs];
-      setLogs(nextLogs);
+    newLog = {
+      id: `log-${Date.now()}`,
+      playerName: activePlayer.name,
+      playerAvatar: activePlayer.avatar,
+      category: currentQuestion.category,
+      questionText: currentQuestion.question,
+      turnNumber: turnCount,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    nextLogs = [newLog, ...logs];
+    setLogs(nextLogs);
 
-      if (currentTurn === 'p1') {
-        setPlayer1((prev) => {
-          const updated = { ...prev, questionsAnswered: prev.questionsAnswered + 1 };
-          player1Ref.current = updated;
-          return updated;
-        });
-      } else {
-        setPlayer2((prev) => {
-          const updated = { ...prev, questionsAnswered: prev.questionsAnswered + 1 };
-          player2Ref.current = updated;
-          return updated;
-        });
-      }
+    if (currentTurn === 'p1') {
+      setPlayer1((prev) => {
+        const updated = { ...prev, questionsAnswered: prev.questionsAnswered + 1 };
+        player1Ref.current = updated;
+        return updated;
+      });
+    } else {
+      setPlayer2((prev) => {
+        const updated = { ...prev, questionsAnswered: prev.questionsAnswered + 1 };
+        player2Ref.current = updated;
+        return updated;
+      });
     }
 
     setCurrentQuestion(null);
@@ -795,22 +841,23 @@ export const App: React.FC = () => {
   };
 
   const handleDareComplete = () => {
+    if (!currentDare) return;
+
     let newLog: AnsweredLog | undefined = undefined;
     let nextLogs = logs;
 
-    if (currentDare) {
-      newLog = {
-        id: `log-${Date.now()}`,
-        playerName: activePlayer.name,
-        playerAvatar: activePlayer.avatar,
-        category: 'VIRTUAL_DARE',
-        questionText: `[Aksi/Dare] ${currentDare.title}: ${currentDare.question}`,
-        turnNumber: turnCount,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      nextLogs = [newLog, ...logs];
-      setLogs(nextLogs);
-    }
+    newLog = {
+      id: `log-${Date.now()}`,
+      playerName: activePlayer.name,
+      playerAvatar: activePlayer.avatar,
+      category: 'VIRTUAL_DARE',
+      questionText: `[Aksi/Dare] ${currentDare.title}: ${currentDare.question}`,
+      turnNumber: turnCount,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    nextLogs = [newLog, ...logs];
+    setLogs(nextLogs);
+
     setCurrentDare(null);
     advanceTurn(newLog, nextLogs);
   };
